@@ -1,0 +1,14 @@
+# Rotacion de logs. Copiar a /etc/logrotate.d/appsolar
+/var/log/appsolar/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 appsolar appsolar
+    sharedscripts
+    postrotate
+        systemctl reload appsolar-backend >/dev/null 2>&1 || true
+    endscript
+}

@@ -1,0 +1,11 @@
+﻿Planta,Tipo,Anio,Mes,Generacion,Comentarios
+Planta Demo Norte,PPA,2025,Enero,45200,Fila valida
+Planta Demo Norte,PPA,1899,Febrero,41800,Anio fuera de rango
+Planta Demo Norte,PPA,2025,Trecemberre,1000,Mes inexistente
+Planta Demo Norte,PPA,2025,Marzo,abc,Generacion no numerica
+Planta Demo Norte,PPA,2025,Abril,-500,Generacion negativa
+,PPA,2025,Mayo,1000,Planta vacia
+Planta Inexistente XYZ,PPA,2025,Junio,1000,Planta no registrada
+Planta Demo Norte,PPA,2025,Julio,=1+1,Intento de formula
+Planta Demo Norte,PPA,2025,Agosto,12000,Fila valida
+Planta Demo Norte,PPA,2025,Agosto,3000,Segunda fila del mismo mes (requiere decision)

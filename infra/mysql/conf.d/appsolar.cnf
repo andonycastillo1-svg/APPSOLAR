@@ -1,0 +1,16 @@
+[mysqld]
+character-set-server = utf8mb4
+collation-server     = utf8mb4_unicode_ci
+default-time-zone    = '-06:00'
+
+# Solo se escucha dentro de la red interna de contenedores.
+skip-name-resolve
+
+# Registro de consultas lentas para el monitoreo basico.
+slow_query_log       = 1
+slow_query_log_file  = /var/lib/mysql/lento.log
+long_query_time      = 2
+
+innodb_buffer_pool_size = 512M
+innodb_flush_log_at_trx_commit = 1
+max_allowed_packet   = 32M
