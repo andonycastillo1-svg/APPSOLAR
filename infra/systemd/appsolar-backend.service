@@ -1,0 +1,46 @@
+# =====================================================================
+# Despliegue SIN Docker: backend Node.js como servicio de systemd.
+#   sudo cp appsolar-backend.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now appsolar-backend
+# =====================================================================
+[Unit]
+Description=API del Sistema de Monitoreo Energetico (Retse, S.A.)
+Documentation=file:///opt/appsolar/docs/despliegue.md
+After=network-online.target mysql.service
+Wants=network-online.target
+Requires=mysql.service
+
+[Service]
+Type=simple
+User=appsolar
+Group=appsolar
+WorkingDirectory=/opt/appsolar
+EnvironmentFile=/opt/appsolar/.env
+Environment=NODE_ENV=production
+Environment=TZ=America/Guatemala
+
+# Las migraciones se aplican antes de cada arranque.
+ExecStartPre=/usr/bin/node /opt/appsolar/backend/dist/db/cli.js migrate
+ExecStart=/usr/bin/node /opt/appsolar/backend/dist/server.js
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Endurecimiento del proceso.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/appsolar/storage /var/log/appsolar
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=append:/var/log/appsolar/backend.log
+StandardError=append:/var/log/appsolar/backend-error.log
+
+[Install]
+WantedBy=multi-user.target

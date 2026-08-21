@@ -1,0 +1,33 @@
+{
+  "name": "appsolar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema Centralizado de Monitoreo Energetico y Analisis de Produccion Solar para Dispositivos Inversores - Retse, S.A.",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "db:migrate": "npm run --workspace backend db:migrate",
+    "db:seed": "npm run --workspace backend db:seed",
+    "db:reset": "npm run --workspace backend db:reset",
+    "dev:backend": "npm run --workspace backend dev",
+    "dev:frontend": "npm run --workspace frontend dev",
+    "dev": "concurrently -n API,WEB -c cyan,green \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "build": "npm run --workspace backend build && npm run --workspace frontend build",
+    "test": "npm run --workspace backend test && npm run --workspace frontend test",
+    "test:e2e": "npm run --workspace backend test:e2e",
+    "lint": "npm run --workspace backend lint",
+    "test:backend": "npm run --workspace backend test",
+    "test:frontend": "npm run --workspace frontend test",
+    "db:plantillas": "npm run --workspace backend db:plantillas",
+    "typecheck": "npm run --workspace backend build && npm run --workspace frontend build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}

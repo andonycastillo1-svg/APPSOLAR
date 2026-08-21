@@ -1,0 +1,10 @@
+[Unit]
+Description=Respaldo diario de la base de datos y archivos de importacion
+
+[Service]
+Type=oneshot
+User=appsolar
+EnvironmentFile=/opt/appsolar/.env
+ExecStart=/opt/appsolar/database/scripts/respaldo.sh
+StandardOutput=append:/var/log/appsolar/respaldo.log
+StandardError=append:/var/log/appsolar/respaldo.log

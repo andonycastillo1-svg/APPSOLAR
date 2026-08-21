@@ -1,0 +1,33 @@
+# =====================================================================
+# Servicio interno de integracion Huawei. Escucha SOLO en 127.0.0.1.
+# =====================================================================
+[Unit]
+Description=Servicio de integracion Huawei SmartPVMS (Retse, S.A.)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=appsolar
+Group=appsolar
+WorkingDirectory=/opt/appsolar/python-service
+EnvironmentFile=/opt/appsolar/.env
+Environment=TZ=America/Guatemala
+
+ExecStart=/opt/appsolar/python-service/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+
+StandardOutput=append:/var/log/appsolar/python.log
+StandardError=append:/var/log/appsolar/python-error.log
+
+[Install]
+WantedBy=multi-user.target
