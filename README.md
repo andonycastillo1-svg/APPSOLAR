@@ -1,6 +1,6 @@
 # Sistema Centralizado de Monitoreo Energético y Análisis de Producción Solar
 
-**Retse, S.A.** · Aplicación web interna para centralizar, consultar y analizar la
+· Aplicación web interna para centralizar, consultar y analizar la
 información energética de los proyectos fotovoltaicos administrados por la empresa.
 
 La plataforma reúne datos hoy dispersos en plataformas de fabricantes, archivos Excel y
