@@ -1,0 +1,1611 @@
+================================================================================
+ SISTEMA CENTRALIZADO DE MONITOREO ENERGETICO Y ANALISIS DE PRODUCCION SOLAR
+ PARA DISPOSITIVOS INVERSORES
+ Retse, S.A. - Uso interno
+
+ DOCUMENTO DE ARQUITECTURA COMPLETA DEL PROYECTO
+ Version 1.0.0
+ Estado: implementado, verificado y desplegable
+================================================================================
+
+
+TABLA DE CONTENIDO
+--------------------------------------------------------------------------------
+  1.  OBJETIVO Y ALCANCE
+  2.  PILA TECNOLOGICA
+  3.  ARQUITECTURA GENERAL Y TOPOLOGIA DE RED
+  4.  SEPARACION DE RESPONSABILIDADES POR CAPA
+  5.  ESTRUCTURA COMPLETA DE ARCHIVOS
+  6.  BACKEND: ORGANIZACION INTERNA
+  7.  FRONTEND: ORGANIZACION INTERNA
+  8.  SERVICIO PYTHON DE INTEGRACION
+  9.  MODELO DE DATOS
+  10. CATALOGO DE ENDPOINTS DEL API
+  11. SEGURIDAD Y CONTROL DE ACCESO
+  12. FLUJOS FUNCIONALES CLAVE
+  13. REGLAS DE NEGOCIO CRITICAS
+  14. ESTRATEGIA DE PRUEBAS
+  15. DESPLIEGUE E INFRAESTRUCTURA
+  16. OBSERVABILIDAD Y OPERACION
+  17. DECISIONES DE DISENO Y SUS MOTIVOS
+  18. ESTADO ACTUAL, SUPUESTOS Y LIMITACIONES
+  19. METRICAS DEL ENTREGABLE
+  20. GLOSARIO
+
+
+================================================================================
+ 1. OBJETIVO Y ALCANCE
+================================================================================
+
+PROPOSITO
+  Centralizar, consultar y analizar la informacion energetica de los proyectos
+  fotovoltaicos administrados por Retse, S.A. La informacion vive hoy dispersa
+  en plataformas de fabricantes, archivos Excel y registros historicos.
+
+  La plataforma reduce el tiempo de consulta, mejora la trazabilidad, permite
+  comparar proyectos e inversores, y genera reportes tecnicos, comerciales y
+  gerenciales homogeneos.
+
+PRINCIPIO RECTOR
+  La plataforma COMPLEMENTA las herramientas oficiales de los fabricantes;
+  NO las sustituye. Solo consume APIs autorizadas.
+
+INCLUIDO EN EL ALCANCE IMPLEMENTADO
+  - Autenticacion y control de acceso por roles (RBAC).
+  - Administracion de usuarios, permisos, clientes, proyectos e inversores.
+  - Registro y consulta de produccion energetica historica y actual.
+  - Carga manual de archivos historicos mediante plantillas estructuradas.
+  - Proceso ETL con validacion, normalizacion y control de duplicidades.
+  - Integracion autorizada con Huawei SmartPVMS via servicio Python.
+  - Historial de importaciones y sincronizaciones con estado y errores.
+  - Tablero de indicadores energeticos y economicos.
+  - Reportes por cliente, proyecto, inversor y periodo.
+  - Comparacion diaria, mensual, anual y entre periodos.
+  - Conversion de energia producida a quetzales (GTQ).
+  - Visualizacion, exportacion (PDF/XLSX/CSV) e impresion de reportes.
+  - Auditoria, seguridad, respaldos y monitoreo basico.
+  - Tarifas mensuales de kWh por proyecto con vigencia historica.
+  - Proyecciones mensuales de generacion y calculo de cumplimiento.
+  - Compatibilidad con el formato historico existente:
+    Planta, Tipo, Anio, Mes, Generacion, Comentarios.
+
+EXCLUIDO EXPLICITAMENTE DEL ALCANCE
+  - Inteligencia artificial y redes neuronales.
+  - Diseno electrico de plantas.
+  - Instalacion o mantenimiento fisico de paneles o inversores.
+  - Modificacion de equipos.
+  - Extraccion no autorizada o web scraping de plataformas de fabricantes.
+  - Portal publico para clientes finales.
+
+CONTEXTO REGIONAL FIJO
+  Idioma            Espanol en toda la interfaz, mensajes, ayuda y reportes.
+  Zona horaria      America/Guatemala (UTC-6, sin horario de verano).
+  Moneda            Quetzal guatemalteco. Codigo GTQ. Simbolo Q.
+  Energia           kWh, siempre.
+  Potencia          kWp, unicamente para potencia instalada.
+  Fechas visibles   dd/mm/aaaa.
+  Fechas API y BD   ISO 8601 (aaaa-mm-dd).
+
+
+================================================================================
+ 2. PILA TECNOLOGICA
+================================================================================
+
+  CAPA                        TECNOLOGIA                        VERSION
+  --------------------------------------------------------------------------
+  Frontend                    React + TypeScript                18.3 / 5.4
+  Empaquetador                Vite                              5.4
+  Estado de servidor          TanStack React Query              5.32
+  Graficas                    Recharts                          2.12
+  Enrutamiento                React Router                      6.23
+  --------------------------------------------------------------------------
+  Backend                     Node.js + TypeScript              20 LTS / 5.4
+  Framework HTTP              Express                           4.19
+  Validacion                  Zod                               3.23
+  Driver de base de datos     mysql2                            3.9
+  Autenticacion               jsonwebtoken + bcryptjs           9.0 / 2.4
+  Carga de archivos           multer                            1.4 LTS
+  Hojas de calculo            exceljs                           4.4
+  Documentos PDF              pdfkit                            0.15
+  Registro estructurado       pino + pino-http                  9.0 / 10.1
+  Tareas programadas          node-cron                         3.0
+  --------------------------------------------------------------------------
+  Base de datos               MySQL                             8.0+
+  Motor de tablas             InnoDB
+  Juego de caracteres         utf8mb4 / utf8mb4_unicode_ci
+  --------------------------------------------------------------------------
+  Integracion y ETL           Python + FastAPI                  3.11 / 0.111
+  Servidor ASGI               uvicorn                           0.30
+  Cliente HTTP                httpx                             0.27
+  --------------------------------------------------------------------------
+  Documentacion de API        OpenAPI                           3.0.3
+  Pruebas                     Vitest + Supertest                1.6 / 7.0
+  Control de versiones        Git
+  --------------------------------------------------------------------------
+  Servidor objetivo           Ubuntu Server                     22.04 LTS+
+  Proxy inverso               Nginx                             1.27
+  Contenedores (opcional)     Docker + Compose                  24 / v2
+  Supervision de procesos     systemd (alternativa a Docker)
+
+
+================================================================================
+ 3. ARQUITECTURA GENERAL Y TOPOLOGIA DE RED
+================================================================================
+
+                        +------------------------------------------+
+                        |          NAVEGADOR DEL USUARIO           |
+                        |  React + TypeScript, espanol, WCAG 2.2 AA|
+                        +---------------------+--------------------+
+                                              |
+                                              |  HTTPS (443)
+                                              |  Cookies HttpOnly + token CSRF
+                                              v
+   ZONA PUBLICA         +------------------------------------------+
+   ..................   |        NGINX  (proxy inverso, TLS)       |
+                        |  Unico servicio expuesto a Internet      |
+                        |  Rate limiting, HSTS, gzip, certificados |
+                        +---------------------+--------------------+
+                                              |
+                                              |  HTTP interno (4000)
+                                              v
+   ZONA PRIVADA         +------------------------------------------+
+                        |     BACKEND NODE.JS + TYPESCRIPT         |
+                        |------------------------------------------|
+                        |  Autenticacion y sesiones                |
+                        |  Autorizacion RBAC (33 permisos)         |
+                        |  Reglas de negocio y valorizacion        |
+                        |  ETL de archivos historicos              |
+                        |  Generacion de reportes y exportacion    |
+                        |  Auditoria y tareas programadas          |
+                        |  Sirve tambien el frontend compilado     |
+                        +------+----------------------------+------+
+                               |                            |
+        Consultas parametrizadas                            |  HTTP interno (8000)
+        (mysql2, sin ORM)      |                            |  Token de servicio
+                               v                            v
+              +--------------------------+   +---------------------------------+
+              |        MySQL 8           |   |   SERVICIO PYTHON (FastAPI)     |
+              |--------------------------|   |---------------------------------|
+              |  22 tablas de negocio    |   |  HuaweiSmartPVMSAdapter         |
+              |  + tabla de migraciones  |   |  Modo REAL y modo MOCK          |
+              |  Datos + auditoria       |   |  Normalizacion a formato canonico|
+              |  Solo red privada        |   |  Solo red privada, sin acceso BD|
+              +--------------------------+   +----------------+----------------+
+                                                              |
+                                                              |  HTTPS saliente
+                                                              |  desde la IP autorizada
+                                                              v
+                                                +-----------------------------+
+                                                |   HUAWEI SMARTPVMS          |
+                                                |   API northbound oficial    |
+                                                +-----------------------------+
+
+REGLA DE EXPOSICION (invariante de seguridad)
+  Solo Nginx escucha en Internet (puertos 80 y 443).
+  MySQL (3306) y el servicio Python (8000) aceptan conexiones UNICAMENTE
+  desde la red privada del servidor. Nunca se publican al exterior, ni en
+  Docker Compose (sin clave "ports") ni en systemd (bind a 127.0.0.1).
+
+
+================================================================================
+ 4. SEPARACION DE RESPONSABILIDADES POR CAPA
+================================================================================
+
+  CAPA        RESPONSABILIDAD                        LO QUE NO HACE
+  --------------------------------------------------------------------------
+  React       Presentacion.                          No decide autorizaciones.
+              Validacion de interaccion.             No aplica reglas de negocio.
+              Estados visuales completos.            No habla con MySQL ni con
+              Accesibilidad.                         el fabricante.
+              Oculta opciones sin permiso.
+  --------------------------------------------------------------------------
+  Node.js     Autenticacion y sesiones.              No consulta directamente al
+              Autorizacion RBAC.                     fabricante: delega en Python.
+              Reglas de negocio y valorizacion.
+              ETL, reportes y auditoria.
+              Unico punto publico de la logica.
+  --------------------------------------------------------------------------
+  MySQL       Persistencia.                          No contiene logica de
+              Integridad referencial.                aplicacion.
+              Restricciones y unicidad.              No almacena secretos en claro.
+              Indices y rendimiento.
+  --------------------------------------------------------------------------
+  Python      Autenticacion ante SmartPVMS.          No accede a MySQL.
+              Consulta a la API autorizada.          No aplica reglas de negocio.
+              Transformacion a formato canonico.     No se expone a Internet.
+              Modo simulado identificado.
+  --------------------------------------------------------------------------
+
+INVARIANTE DE AUTORIZACION
+  Ocultar una opcion en la interfaz NUNCA sustituye la autorizacion del
+  servidor. Cada endpoint verifica los permisos efectivos del usuario en cada
+  peticion mediante el middleware requierePermiso(). La comprobacion del
+  frontend (funcion puede()) solo mejora la experiencia de uso.
+
+
+================================================================================
+ 5. ESTRUCTURA COMPLETA DE ARCHIVOS
+================================================================================
+
+APPSOLAR/
+|
++-- .env.example                     Variables de entorno documentadas, SIN secretos
++-- .gitignore
++-- README.md                        Instalacion local y produccion
++-- ARQUITECTURA.txt                 Este documento
++-- package.json                     Monorepo con workspaces (backend, frontend)
+|
++-- backend/                         API REST y logica de negocio
+|   +-- .eslintrc.json
+|   +-- package.json
+|   +-- tsconfig.json
+|   +-- vitest.config.ts
+|   +-- src/
+|   |   +-- app.ts                   Ensamblado de Express: seguridad, CORS, rutas
+|   |   +-- server.ts                Arranque, apagado ordenado, senales
+|   |   +-- config/
+|   |   |   +-- env.ts               Carga y validacion de variables de entorno
+|   |   |   +-- logger.ts            pino con redaccion obligatoria de secretos
+|   |   |   +-- permisos.ts          Catalogo de 33 permisos y matriz por rol
+|   |   +-- db/
+|   |   |   +-- pool.ts              Pool mysql2, query/execute/withTransaction
+|   |   |   +-- migrator.ts          Ejecutor de migraciones con control de hash
+|   |   |   +-- cli.ts               CLI: create, migrate, bootstrap, seed, reset
+|   |   |   +-- seed.ts              Administrador inicial y datos de demostracion
+|   |   |   +-- generarPlantillas.ts Genera las plantillas de database/seeds/
+|   |   +-- middleware/
+|   |   |   +-- autenticacion.ts     Sesion, CSRF, RBAC, correlacion
+|   |   |   +-- errores.ts           Manejo centralizado, mensajes en espanol
+|   |   +-- modules/                 Un directorio por dominio
+|   |   |   +-- auth/auth.routes.ts
+|   |   |   +-- usuarios/usuarios.routes.ts
+|   |   |   +-- clientes/clientes.routes.ts
+|   |   |   +-- proyectos/proyectos.routes.ts
+|   |   |   +-- tarifas/tarifas.routes.ts
+|   |   |   +-- proyecciones/proyecciones.routes.ts
+|   |   |   +-- inversores/inversores.routes.ts
+|   |   |   +-- produccion/produccion.routes.ts
+|   |   |   +-- importaciones/importaciones.routes.ts
+|   |   |   +-- integracion/huawei.routes.ts
+|   |   |   +-- dashboard/dashboard.routes.ts
+|   |   |   +-- reportes/reportes.routes.ts
+|   |   |   +-- sistema/sistema.routes.ts   Auditoria, configuracion y salud
+|   |   +-- services/                Logica reutilizable entre modulos
+|   |   |   +-- auth.ts              Contrasenas, tokens, cookies, permisos
+|   |   |   +-- valorizacion.ts      Motor de calculo monetario y cierres
+|   |   |   +-- consultasProduccion.ts  Agregaciones y anti-doble-conteo
+|   |   |   +-- etl.ts               Lectura, normalizacion y plantillas
+|   |   |   +-- archivos.ts          Validacion y almacenamiento seguro
+|   |   |   +-- sincronizacion.ts    Flujo completo de sincronizacion Huawei
+|   |   |   +-- huaweiCliente.ts     Cliente del servicio Python interno
+|   |   |   +-- exportacion.ts       Generacion de PDF, XLSX y CSV
+|   |   |   +-- auditoria.ts         Registro con sanitizacion de sensibles
+|   |   |   +-- configuracion.ts     Parametros con cache
+|   |   |   +-- bloqueos.ts          Bloqueo cooperativo con expiracion
+|   |   +-- jobs/
+|   |   |   +-- programador.ts       Sincronizacion programada y mantenimiento
+|   |   +-- utils/
+|   |   |   +-- errors.ts            AppError y constructores por tipo
+|   |   |   +-- http.ts              Contrato de respuesta, paginacion, validacion
+|   |   |   +-- fechas.ts            Zona horaria, meses en espanol, periodos
+|   |   |   +-- numeros.ts           Redondeo documentado y parseo tolerante
+|   |   +-- types/
+|   |       +-- express.d.ts         Extension de Request (usuario, correlacion)
+|   +-- tests/
+|       +-- setup.ts                 Entorno de pruebas antes de cargar src/
+|       +-- utils/entorno.ts         Utilidades y doble del servicio Python
+|       +-- autenticacion.test.ts
+|       +-- rbac.test.ts
+|       +-- tarifas.test.ts
+|       +-- importaciones.test.ts
+|       +-- huawei.test.ts
+|       +-- analisis.test.ts
+|       +-- seguridad.test.ts
+|       +-- e2e/recorrido.test.ts    Recorrido completo de punta a punta
+|
++-- frontend/                        Interfaz React
+|   +-- index.html
+|   +-- package.json
+|   +-- tsconfig.json
+|   +-- vite.config.ts               Proxy /api hacia el backend en desarrollo
+|   +-- src/
+|       +-- main.tsx                 Punto de entrada y React Query
+|       +-- App.tsx                  Enrutador y proteccion de rutas
+|       +-- styles/global.css        Sistema de diseno completo
+|       +-- lib/
+|       |   +-- api.ts               Cliente HTTP: CSRF, renovacion, descargas
+|       |   +-- auth.tsx             Contexto de sesion y helpers de permisos
+|       |   +-- formato.ts           kWh, kWp, quetzales, fechas, estados
+|       |   +-- formato.test.ts      Pruebas unitarias de presentacion
+|       +-- hooks/
+|       |   +-- useCatalogos.ts      Clientes, proyectos e inversores
+|       |   +-- useListado.ts        Busqueda, filtros, orden y paginacion
+|       +-- components/
+|       |   +-- Layout.tsx           Barra lateral, encabezado, navegacion
+|       |   +-- Estados.tsx          Carga, vacio, error, sin permiso, modal
+|       |   +-- Campos.tsx           Campos de formulario accesibles
+|       |   +-- Tabla.tsx            Tabla accesible con orden y paginacion
+|       |   +-- Graficas.tsx         Recharts con alternativa textual
+|       +-- pages/                   16 pantallas
+|           +-- Ingreso.tsx
+|           +-- Perfil.tsx
+|           +-- Tablero.tsx
+|           +-- ResumenAnual.tsx
+|           +-- Clientes.tsx
+|           +-- Proyectos.tsx
+|           +-- ProyectoDetalle.tsx  Resumen, tarifas y proyecciones
+|           +-- Inversores.tsx
+|           +-- Produccion.tsx
+|           +-- Importaciones.tsx    Asistente de 7 pasos
+|           +-- Integracion.tsx
+|           +-- Reportes.tsx
+|           +-- Usuarios.tsx
+|           +-- Auditoria.tsx
+|           +-- Configuracion.tsx
+|           +-- EstadoServicios.tsx
+|
++-- python-service/                  Adaptador de fabricante (interno)
+|   +-- requirements.txt
+|   +-- app/
+|       +-- main.py                  FastAPI: /health, /huawei/test, /huawei/production
+|       +-- config.py                Variables de entorno del adaptador
+|       +-- adapters/
+|           +-- base.py              Contrato AdaptadorFabricante y tipos canonicos
+|           +-- huawei.py            HuaweiSmartPVMSAdapter (REAL y MOCK)
+|
++-- database/
+|   +-- migrations/
+|   |   +-- 001_core.sql             Roles, permisos, usuarios, sesiones, auditoria
+|   |   +-- 002_negocio.sql          Clientes, proyectos, inversores, APIs
+|   |   +-- 003_energia.sql          Tarifas, proyecciones, cierres, produccion
+|   |   +-- 004_importacion.sql      Historicos, sincronizaciones, reportes
+|   |   +-- 005_catalogos.sql        Datos de referencia obligatorios
+|   +-- seeds/
+|   |   +-- plantilla_historica.csv / .xlsx
+|   |   +-- plantilla_normalizada.csv / .xlsx
+|   |   +-- ejemplo_con_errores.csv  Archivo para demostrar la validacion
+|   +-- scripts/
+|       +-- respaldo.sh              Volcado, verificacion y retencion
+|       +-- restaurar.sh             Restauracion con confirmacion escrita
+|
++-- docs/
+|   +-- openapi.json                 60 rutas, 75 operaciones
+|   +-- arquitectura.md
+|   +-- modelo-datos.md
+|   +-- matriz-permisos.md
+|   +-- manual-usuario.md            Guia por rol
+|   +-- manual-tecnico.md            Guia para mantener y extender
+|   +-- despliegue.md
+|   +-- operacion.md                 Respaldo, restauracion, monitoreo
+|   +-- supuestos-limitaciones.md
+|
++-- infra/
+|   +-- docker-compose.yml           mysql, python, backend, proxy
+|   +-- backend.Dockerfile           Multietapa: compila y ejecuta sin root
+|   +-- python.Dockerfile            Servicio interno sin root
+|   +-- nginx/appsolar.conf          HTTPS, rate limiting, cabeceras
+|   +-- nginx/proxy_comun.inc
+|   +-- mysql/conf.d/appsolar.cnf
+|   +-- systemd/                     4 unidades: backend, python, respaldo, timer
+|   +-- logrotate-appsolar
+|
++-- storage/uploads/                 Archivos cargados, fuera del arbol publico
+
+
+================================================================================
+ 6. BACKEND: ORGANIZACION INTERNA
+================================================================================
+
+PATRON DE CADA MODULO
+  Cada modulo de dominio expone un Router de Express. Una ruta tipica declara,
+  en este orden:
+
+      router.post(
+        '/',                                  ruta relativa
+        requierePermiso(PERMISOS.X),          autorizacion en el servidor
+        validarCuerpo(esquemaZod),            validacion y normalizacion
+        asyncHandler(async (req, res) => {    logica de negocio
+          ...
+          await auditarDesdeRequest(req, {...});   auditoria
+          creado(res, { ... });                    respuesta uniforme
+        }),
+      );
+
+CONTRATO DE RESPUESTA UNIFORME
+  Exito   { "ok": true,  "datos": <...>, "meta": { ... } }
+  Error   { "ok": false, "error": { "codigo", "mensaje", "detalles",
+                                    "correlationId" } }
+
+  Todos los mensajes de error estan en espanol y son accionables.
+
+CODIGOS DE ERROR ESTABLES
+  NO_AUTENTICADO          401   Sesion ausente, invalida o expirada
+  SIN_PERMISO             403   El rol no incluye el permiso requerido
+  NO_ENCONTRADO           404   El recurso no existe
+  RUTA_NO_ENCONTRADA      404   Endpoint inexistente
+  SOLICITUD_INVALIDA      400   Peticion mal formada o sin token CSRF
+  VALIDACION              422   Datos que no cumplen el esquema
+  CONFLICTO               409   Duplicado o conflicto de estado
+  REGLA_NEGOCIO           409   Operacion prohibida por una regla del dominio
+  LIMITE_SOLICITUDES      429   Rate limiting
+  USUARIO_BLOQUEADO       429   Bloqueo temporal por intentos fallidos
+  SERVICIO_NO_DISPONIBLE  503   Dependencia externa caida
+  ERROR_INTERNO           500   Fallo no controlado (sin filtrar detalles)
+
+  Codigos especificos de la integracion Huawei:
+  CREDENCIALES_INVALIDAS  401
+  IP_NO_AUTORIZADA        403
+  LIMITE_API              429
+  FORMATO_INESPERADO      502
+  TIEMPO_AGOTADO          504
+  CONFIGURACION_INCOMPLETA 422
+
+CADENA DE MIDDLEWARE (orden en app.ts)
+   1. helmet                Cabeceras de seguridad y CSP
+   2. cors                  Origenes autorizados; el propio origen se permite
+   3. compression           Compresion de respuestas
+   4. express.json          Cuerpo JSON, limite 2 MB
+   5. cookieParser          Lectura de cookies de sesion
+   6. correlacion           Asigna x-correlation-id a cada peticion
+   7. pinoHttp              Registro estructurado con redaccion
+   8. rateLimit             Limitador general sobre /api
+   9. protegerCsrf          Double submit en metodos que modifican estado
+  10. <routers de dominio>  Cada uno con requiereAutenticacion y permisos
+  11. estatico frontend     Sirve frontend/dist si existe
+  12. noEncontrado          404 con contrato uniforme
+  13. manejadorErrores      Traduccion centralizada, incluidos errores MySQL
+
+SERVICIOS TRANSVERSALES
+
+  valorizacion.ts
+    buscarTarifaAprobada      Tarifa vigente de proyecto/anio/mes
+    CacheTarifas              Evita repetir consultas en lotes grandes
+    calcularValorizacion      Devuelve id_tarifa, costo aplicado, valor y estado
+    recalcularPendientes      Valoriza pendientes al aprobar una tarifa
+    analizarImpacto           Calculo previo obligatorio antes de corregir
+    recalcularPorTarifa       Aplica la correccion a los registros afectados
+    mesEstaCerrado            Consulta de cierre mensual
+    exigirMesAbierto          Bloquea operaciones sobre periodos cerrados
+    coberturaTarifaria        Meses con y sin tarifa del periodo
+
+  consultasProduccion.ts
+    resumen                   Totales del periodo con anti-doble-conteo
+    serieTemporal             Agregacion diaria, mensual o anual
+    porProyecto / porInversor Agrupaciones comparables
+    rendimientoRelativo       Normalizado por kWp; excluye no comparables
+    compararPeriodos          Contra el periodo anterior equivalente
+    resumenAnual              Vista equivalente al Excel de referencia
+    detalle                   Listado paginado
+    periodosConMezclaDeNiveles  Aviso operativo al usuario
+
+  etl.ts
+    detectarFormato           NORMALIZADO o HISTORICO_EXCEL por encabezados
+    leerArchivo               CSV o XLSX a filas canonicas + problemas por fila
+    agruparPorPeriodo         Agrupa por planta/anio/mes y marca ambiguedades
+    plantilla*                Genera plantillas y el ejemplo con errores
+
+  archivos.ts
+    crearSubidor              multer en memoria con limites
+    validarYGuardar           Extension, tamano, firma binaria, hash, nombre seguro
+    neutralizarFormula        Defensa contra inyeccion de formulas CSV
+    guardar/leer/eliminarLotePreparado  Persistencia del lote entre pasos
+
+  sincronizacion.ts
+    ejecutarSincronizacion    Flujo completo con bloqueo, revalidacion e idempotencia
+
+  auditoria.ts
+    sanitizar                 Redacta campos sensibles de forma recursiva
+    registrarAuditoria        Nunca interrumpe la operacion principal
+    auditarDesdeRequest       Toma usuario, IP y correlacion de la peticion
+
+
+================================================================================
+ 7. FRONTEND: ORGANIZACION INTERNA
+================================================================================
+
+SISTEMA DE DISENO
+  Paleta inspirada en energia solar, con contraste verificado para WCAG AA:
+    Azul profundo   #062639  #0b3c5d  #14567f   Identidad y navegacion
+    Verde           #14622f  #1e8449            Exito y valores confirmados
+    Ambar           #8a5a00  #b7791f            Advertencias y pendientes
+    Rojo            #9b1c1c  #c0392b            Errores y acciones destructivas
+    Grises          #1b2227 .. #f2f5f7          Texto, bordes y superficies
+
+  Todo el color se acompana SIEMPRE de texto: ninguna informacion depende
+  unicamente del color.
+
+NAVEGACION (barra lateral, agrupada, filtrada por permisos)
+  Analisis          Tablero, Resumen anual, Reportes
+  Operacion         Produccion, Carga de historicos, Integracion Huawei
+  Catalogos         Clientes, Proyectos solares, Inversores
+  Administracion    Usuarios y permisos, Auditoria, Configuracion,
+                    Estado de servicios
+
+ESTADOS VISUALES OBLIGATORIOS EN CADA PANTALLA
+  Carga        Indicador con aria-live y esqueletos de tabla
+  Vacio        Titulo, explicacion y accion sugerida si el rol la permite
+  Error        Mensaje en espanol, detalle por campo y referencia de soporte
+  Sin permiso  Explica el permiso faltante y a quien solicitarlo
+  Exito        Confirmacion anunciada a lectores de pantalla
+
+ACCESIBILIDAD IMPLEMENTADA (WCAG 2.2 nivel AA)
+  - Enlace "Saltar al contenido principal" al inicio de cada pagina.
+  - Foco visible con contorno ambar de 3 px en todo elemento interactivo.
+  - Etiquetas asociadas por id y ayuda/error vinculados con aria-describedby.
+  - aria-invalid y aria-required en los campos con problema.
+  - Tablas con encabezados de fila y columna, y aria-sort en las ordenables.
+  - Graficas con figcaption, role="img" y tabla alternativa desplegable.
+  - Modales con foco atrapado, cierre con Escape y aria-modal.
+  - Respeto de prefers-reduced-motion.
+  - Vista de impresion limpia mediante media queries.
+
+CLIENTE HTTP (lib/api.ts)
+  - Credenciales en cookies HttpOnly; el token nunca se guarda en localStorage.
+  - Token CSRF leido de la cookie as_csrf y enviado en x-csrf-token.
+  - Ante un 401 dispara UNA renovacion de sesion y reintenta la peticion.
+  - Descargas y apertura de PDF respetando la sesion con cookies.
+
+RESPONSIVE
+  Escritorio  Barra lateral fija de 264 px
+  Tableta     Barra lateral deslizable con boton de menu (<= 1024 px)
+  Movil       Rejillas de una o dos columnas, tablas con scroll horizontal
+
+
+================================================================================
+ 8. SERVICIO PYTHON DE INTEGRACION
+================================================================================
+
+CONTRATO HTTP INTERNO
+  GET  /health              Estado y modo del adaptador
+  POST /huawei/test         Prueba de conexion y verificacion de IP
+  POST /huawei/production   Consulta de produccion en formato canonico
+
+  Todas las peticiones exigen la cabecera x-service-token, compartida con el
+  backend. Sin ella el servicio no atiende ninguna solicitud.
+
+FORMATO CANONICO DE SALIDA
+  {
+    "serial":       "SN-INV-001",
+    "fecha":        "2026-08-21",      ISO 8601
+    "kwh":          1250.5,             energia, 4 decimales
+    "granularidad": "DIARIA",           DIARIA o MENSUAL
+    "estacion":     "NE=STATION-01"     opcional
+  }
+
+MODO REAL
+  Consume la API northbound oficial de FusionSolar:
+    POST /thirdData/login              Autenticacion, devuelve XSRF-TOKEN
+    POST /thirdData/getStationList     Estaciones accesibles
+    POST /thirdData/getDevList         Dispositivos de una estacion
+    POST /thirdData/getDevKpiDay       Produccion diaria por dispositivo
+    POST /thirdData/getDevKpiMonth     Produccion mensual por dispositivo
+
+  Incluye reintentos con retroceso exponencial, reautenticacion ante sesion
+  expirada y traduccion de los codigos de fallo del fabricante (20001, 20005,
+  20008, 305, 401, 407, ...) a los codigos estables del sistema.
+
+  Antes de operar compara la IP publica de salida real con la IP autorizada
+  declarada y rechaza la operacion si no coinciden.
+
+MODO MOCK (sandbox)
+  Genera datos deterministas por serial mediante una semilla estable, lo que
+  permite comprobar la idempotencia de la sincronizacion. Aplica un perfil de
+  estacionalidad de Guatemala y un rendimiento tipico de 3.5 a 5.5 kWh/kWp.
+
+  Toda respuesta incluye la advertencia:
+    "DATOS SIMULADOS: generados por el modo sandbox del adaptador.
+     No provienen de la plataforma real del fabricante."
+
+  El backend propaga esa marca hasta la interfaz y el historial de ejecuciones.
+
+EXTENSIBILIDAD
+  La clase abstracta AdaptadorFabricante define el contrato comun. Para anadir
+  otro fabricante se implementa probar_conexion() y obtener_produccion(), y se
+  traducen sus codigos de fallo. En esta version SOLO se implementa Huawei,
+  conforme al alcance. Queda prohibido el scraping o cualquier metodo no
+  autorizado.
+
+
+================================================================================
+ 9. MODELO DE DATOS
+================================================================================
+
+DIAGRAMA ENTIDAD-RELACION
+
+    +-------------+ 1      * +---------------+ 1      * +------------------+
+    |  clientes   |----------|   proyectos   |----------|    inversores    |
+    |-------------|          |---------------|          |------------------|
+    | id_cliente  |          | id_proyecto   |          | id_inversor      |
+    | nombre      |          | id_cliente FK |          | id_proyecto  FK  |
+    | nit      UQ |          | nombre     UQ |          | marca, modelo    |
+    | ubicacion   |          | tipo_proyecto |          | tipo_conexion    |
+    | activo      |          | capacidad_kwp |          | serial_externo   |
+    +-------------+          | activo        |          | id_api       FK  |
+                             +-------+-------+          +---------+--------+
+                                     |                            |
+              +----------------------+------------+               |
+              |                      |            |               |
+     +--------v--------+  +----------v------+  +--v---------------v--------+
+     |  tarifas_kwh    |  |proyecciones_kwh |  |        produccion         |
+     |-----------------|  |-----------------|  |---------------------------|
+     | id_tarifa    PK |  | id_proyeccion PK|  | id_produccion          PK |
+     | id_proyecto  FK |  | id_proyecto  FK |  | id_proyecto            FK |
+     | anio, mes       |  | anio, mes       |  | id_inversor       FK NULL |
+     | costo_kwh       |  | proyeccion_kwh  |  | nivel_detalle             |
+     | estado          |  | estado          |  | fecha, anio, mes          |
+     | clave_vigente UQ|  | clave_vigente UQ|  | granularidad              |
+     +--------+--------+  +-----------------+  | kwh, origen, secuencia    |
+              |                                | id_tarifa              FK |
+              +--------------- valoriza -------| costo_kwh_aplicado        |
+                                               | valor_q                   |
+     +-------------------+                     | estado_valorizacion       |
+     | cierres_mensuales |                     | id_historico           FK |
+     | (proyecto,anio,   |                     | id_sync                FK |
+     |  mes)          UQ |                     | inversor_key    generada  |
+     +-------------------+                     +------------+--------------+
+                                                            |
+                                     +----------------------+-------+
+                                     |                              |
+                          +----------v---------+       +------------v-------+
+                          |    historicos      | 1   * | produccion_ajustes |
+                          |--------------------|       +--------------------+
+                          | id_historico    PK |
+                          | formato            | 1   * +--------------------+
+                          | nivel_detalle      |-------| historico_errores  |
+                          | hash_sha256        |       +--------------------+
+                          | estado, totales    |
+                          +--------------------+
+
+    +------------------+ 1   * +-------------------+     +------------------+
+    | apis_fabricante  |-------| sincronizaciones  |     |     reportes     |
+    |------------------|       |-------------------|     |------------------|
+    | id_api        PK |       | id_sync        PK |     | id_reporte    PK |
+    | marca, endpoint  |       | estado, modo      |     | id_usuario    FK |
+    | ip_autorizada    |       | rango, metricas   |     | tipo, parametros |
+    | secreto_ref      |       | codigo_error      |     | cobertura_tarif. |
+    | modo, estado     |       +-------------------+     +------------------+
+    +------------------+
+
+    +-----------+ 1 * +--------------+ * 1 +-----------+  +------------------+
+    |   roles   |-----| rol_permisos |-----| permisos  |  | refresh_tokens   |
+    +-----+-----+     +--------------+     +-----+-----+  | token_hash    UQ |
+          | 1                                    |        +--------+---------+
+          |                                      |                 | *
+          | *      +--------------------+        |                 | 1
+    +-----v--------+--+  +--------------v-----+  |        +--------v---------+
+    |    usuarios     |--|  usuario_permisos  |  |        |    auditoria     |
+    | id_usuario   PK | *|  otorgado 1 o 0    |  |        | accion, entidad  |
+    | email        UQ |  +--------------------+  |        | antes / despues  |
+    | password_hash   |                          |        +------------------+
+    +-----------------+                          |
+
+    +----------------+   +------------+   +---------------+
+    | configuracion  |   |  bloqueos  |   | _migraciones  |
+    +----------------+   +------------+   +---------------+
+
+INVENTARIO DE TABLAS (22 de negocio + 1 de control)
+
+  #   TABLA                 PROPOSITO
+  --------------------------------------------------------------------------
+   1  roles                 ADMINISTRATIVO, OPERATIVO, GERENCIAL
+   2  permisos              Catalogo de 33 permisos
+   3  rol_permisos          Matriz RBAC base
+   4  usuarios              Cuentas, estado, bloqueo e intentos fallidos
+   5  usuario_permisos      Permisos otorgados o revocados individualmente
+   6  refresh_tokens        Sesiones renovables; solo el hash del token
+   7  auditoria             Bitacora con datos antes y despues
+   8  configuracion         Parametros con tipo, unidad, fuente y editable
+   9  bloqueos              Bloqueo cooperativo con expiracion
+  10  clientes              Empresas propietarias
+  11  proyectos             Plantas solares con modalidad comercial
+  12  apis_fabricante       Configuracion de integracion (sin credenciales)
+  13  inversores            Dispositivos, con serial externo y estacion
+  14  tarifas_kwh           Tarifa mensual GTQ/kWh con estado y aprobacion
+  15  proyecciones_kwh      Proyeccion mensual en kWh con estado
+  16  cierres_mensuales     Cierre y reapertura de periodos por proyecto
+  17  produccion            Registros energeticos valorizados
+  18  produccion_ajustes    Historial de correcciones manuales
+  19  historicos            Lotes de importacion con hash y resultados
+  20  historico_errores     Errores y advertencias por fila
+  21  sincronizaciones      Ejecuciones Huawei con metricas y errores
+  22  reportes              Reportes guardados con parametros y cobertura
+  --------------------------------------------------------------------------
+  23  _migraciones          Control de migraciones aplicadas (con hash)
+
+TABLA CRITICA: produccion
+
+  COLUMNA               TIPO                  NOTAS
+  --------------------------------------------------------------------------
+  id_produccion         BIGINT UNSIGNED PK
+  id_proyecto           INT UNSIGNED FK       Siempre presente
+  id_inversor           INT UNSIGNED FK NULL  Nulo en consolidado de proyecto
+  nivel_detalle         ENUM                  POR_INVERSOR | PROYECTO_CONSOLIDADO
+  fecha                 DATE                  Mensual se ancla al dia 1
+  anio, mes             SMALLINT / TINYINT    Redundantes por rendimiento
+  granularidad          ENUM                  DIARIA | MENSUAL
+  kwh                   DECIMAL(18,4)         CHECK (kwh >= 0)
+  origen                ENUM                  MANUAL | HUAWEI_API | AJUSTE
+  secuencia             SMALLINT              Componentes del mismo periodo
+  id_tarifa             INT UNSIGNED FK NULL  Trazabilidad de la tarifa
+  costo_kwh_aplicado    DECIMAL(12,6) NULL    Copia historica del costo
+  valor_q               DECIMAL(18,4) NULL    kwh x costo_kwh_aplicado
+  estado_valorizacion   ENUM                  VALORIZADA | PENDIENTE_DE_TARIFA
+  inversor_key          INT generada STORED   COALESCE(id_inversor, 0)
+
+  REGLA DE UNICIDAD DOCUMENTADA (idempotencia de cargas y sincronizaciones)
+
+    UNIQUE KEY uk_produccion
+      (id_proyecto, inversor_key, fecha, granularidad, origen, secuencia)
+
+    No se usa solo proyecto + anio + mes porque el archivo historico de
+    referencia contiene MAS DE UNA FILA VALIDA para una misma planta y mes.
+
+  RESTRICCION DE COHERENCIA
+
+    CHECK ((nivel_detalle = 'POR_INVERSOR'         AND id_inversor IS NOT NULL)
+        OR (nivel_detalle = 'PROYECTO_CONSOLIDADO' AND id_inversor IS NULL))
+
+UNICIDAD DE TARIFAS Y PROYECCIONES
+
+  Ambas tablas admiten historial de anulaciones conservando la unicidad de lo
+  vigente mediante una columna generada que vale NULL cuando el registro esta
+  anulado (MySQL permite multiples NULL en un indice UNIQUE):
+
+    clave_vigente VARCHAR(40) GENERATED ALWAYS AS
+        (IF(estado = 'ANULADA', NULL,
+            CONCAT(id_proyecto, '-', anio, '-', mes))) STORED,
+    UNIQUE KEY uk_tarifa_vigente (clave_vigente)
+
+  Resultado: muchas tarifas ANULADAS para el mismo periodo, pero A LO SUMO UNA
+  vigente (BORRADOR o APROBADA).
+
+  RESTRICCION DE MySQL A TENER PRESENTE
+    Una clave foranea sobre una columna que es base de una columna generada
+    STORED no puede usar CASCADE, SET NULL ni SET DEFAULT. Por eso la FK
+    id_proyecto de tarifas_kwh y proyecciones_kwh queda en RESTRICT: un
+    proyecto con tarifas no se elimina, se desactiva.
+
+INDICES PRINCIPALES
+  produccion    ix_prod_fecha
+                ix_prod_periodo(id_proyecto, anio, mes)
+                ix_prod_inversor_fecha(id_inversor, fecha)
+                ix_prod_valorizacion(estado_valorizacion)
+                ix_prod_nivel(id_proyecto, nivel_detalle, granularidad, fecha)
+  tarifas_kwh   ix_tarifas_periodo(id_proyecto, anio, mes, estado)
+  auditoria     ix_aud_fecha, ix_aud_usuario, ix_aud_entidad, ix_aud_accion
+  historicos    ix_hist_proyecto, ix_hist_estado, ix_hist_fecha, ix_hist_hash
+
+ESTRATEGIA DE BAJA
+  El sistema privilegia la desactivacion logica (activo = 0) para conservar la
+  trazabilidad. La eliminacion fisica solo procede cuando el registro no tiene
+  ninguna relacion; en caso contrario el API responde eliminado: false y
+  explica el motivo al usuario.
+
+MIGRACIONES
+  El ejecutor registra cada archivo con su hash SHA-256. Si una migracion ya
+  aplicada se modifica, el sistema lo advierte en el log: la regla es crear una
+  migracion nueva, nunca editar una existente.
+
+
+================================================================================
+ 10. CATALOGO DE ENDPOINTS DEL API
+================================================================================
+
+Prefijo comun: /api          Documentacion completa: docs/openapi.json
+Total: 60 rutas, 75 operaciones.
+
+AUTENTICACION                                              PERMISO REQUERIDO
+  POST   /auth/login                    Iniciar sesion            publico
+  POST   /auth/refresh                  Renovar (rota el token)   sesion
+  POST   /auth/logout                   Cerrar sesion             sesion
+  GET    /auth/me                       Perfil y permisos         sesion
+  POST   /auth/change-password          Cambiar contrasena        sesion
+  GET    /auth/sesiones                 Sesiones activas propias  sesion
+
+USUARIOS
+  GET    /users                         Listar                    usuarios.ver
+  GET    /users/roles                   Catalogo roles/permisos   usuarios.ver
+  GET    /users/:id                     Detalle con permisos      usuarios.ver
+  POST   /users                         Crear                     usuarios.gestionar
+  PUT    /users/:id                     Actualizar                usuarios.gestionar
+  POST   /users/:id/reset-password      Restablecer acceso        usuarios.gestionar
+  PUT    /users/:id/permissions         Permisos individuales     usuarios.gestionar
+
+CLIENTES
+  GET    /clients                       Listar                    clientes.ver
+  GET    /clients/:id                   Detalle con proyectos     clientes.ver
+  POST   /clients                       Crear                     clientes.gestionar
+  PUT    /clients/:id                   Actualizar                clientes.gestionar
+  DELETE /clients/:id                   Eliminar o desactivar     clientes.gestionar
+
+PROYECTOS
+  GET    /projects                      Listar                    proyectos.ver
+  GET    /projects/:id                  Detalle completo          proyectos.ver
+  POST   /projects                      Crear                     proyectos.gestionar
+  PUT    /projects/:id                  Actualizar                proyectos.gestionar
+  DELETE /projects/:id                  Eliminar o desactivar     proyectos.gestionar
+
+TARIFAS  (submodulo anidado del proyecto)
+  GET    /projects/:id/rates                    Calendario anual  tarifas.ver
+  POST   /projects/:id/rates                    Registrar         tarifas.gestionar
+  POST   /projects/:id/rates/copy-previous      Copiar mes ant.   tarifas.gestionar
+  PUT    /projects/:id/rates/:rateId            Editar borrador   tarifas.gestionar
+  POST   /projects/:id/rates/:rateId/approve    Aprobar           tarifas.aprobar
+  POST   /projects/:id/rates/:rateId/impact     Analisis impacto  tarifas.recalcular
+  POST   /projects/:id/rates/:rateId/recalculate Corregir         tarifas.recalcular
+  POST   /projects/:id/rates/:rateId/annul      Anular            tarifas.aprobar
+  POST   /projects/:id/rates/close              Cerrar mes        tarifas.cerrar_mes
+  POST   /projects/:id/rates/reopen             Reabrir mes       tarifas.reabrir_mes
+
+PROYECCIONES  (submodulo anidado del proyecto)
+  GET    /projects/:id/projections                     Calendario proyecciones.ver
+  POST   /projects/:id/projections                     Capturar   proyecciones.gestionar
+  POST   /projects/:id/projections/copy-year           Copiar     proyecciones.gestionar
+  POST   /projects/:id/projections/:pid/approve        Aprobar    proyecciones.aprobar
+  POST   /projects/:id/projections/approve-year        Aprobar anio proyecciones.aprobar
+
+INVERSORES
+  GET    /inverters                     Listar                    inversores.ver
+  GET    /inverters/:id                 Detalle e historiales     inversores.ver
+  POST   /inverters                     Crear                     inversores.gestionar
+  PUT    /inverters/:id                 Actualizar                inversores.gestionar
+  DELETE /inverters/:id                 Eliminar o desactivar     inversores.gestionar
+
+PRODUCCION
+  GET    /production                    Detalle paginado          produccion.ver
+  GET    /production/summary            Resumen y cobertura       produccion.ver
+  GET    /production/timeseries         Serie agregada            produccion.ver
+  GET    /production/compare            Comparaciones             produccion.ver
+  GET    /production/annual-summary     Resumen anual tipo Excel  produccion.ver
+  POST   /production                    Registrar manualmente     produccion.registrar
+  PUT    /production/:id                Corregir con motivo       produccion.corregir
+
+IMPORTACIONES
+  GET    /imports/template              Plantillas y ejemplo      importaciones.ver
+  POST   /imports/preview               Validar y previsualizar   importaciones.cargar
+  POST   /imports/:id/confirm           Confirmar la carga        importaciones.cargar
+  GET    /imports                       Historial                 importaciones.ver
+  GET    /imports/:id                   Detalle con errores       importaciones.ver
+  GET    /imports/:id/errors            Descargar errores CSV     importaciones.ver
+  DELETE /imports/:id                   Cancelar previsualizacion importaciones.cargar
+
+INTEGRACION HUAWEI
+  GET    /integrations/huawei/config            Configuracion     huawei.ver
+  PUT    /integrations/huawei/config/:id        Configurar        huawei.configurar
+  POST   /integrations/huawei/test              Probar conexion   huawei.sincronizar
+  POST   /integrations/huawei/sync              Sincronizar       huawei.sincronizar
+  GET    /integrations/huawei/runs              Historial         huawei.ver
+  GET    /integrations/huawei/runs/:id          Detalle           huawei.ver
+  GET    /integrations/huawei/suggested-range   Rango sugerido    huawei.ver
+
+TABLERO Y REPORTES
+  GET    /dashboard                     Indicadores consolidados  dashboard.ver
+  POST   /reports/generate              Generar reporte           reportes.generar
+  GET    /reports                       Historial                 reportes.ver
+  GET    /reports/:id                   Detalle                   reportes.ver
+  GET    /reports/:id/export            PDF, XLSX o CSV           reportes.exportar
+
+SISTEMA
+  GET    /audit                         Bitacora                  auditoria.ver
+  GET    /audit/acciones                Catalogo de acciones      auditoria.ver
+  GET    /config                        Parametros                config.ver
+  PUT    /config/:clave                 Actualizar parametro      config.gestionar
+  GET    /health                        Estado publico minimo     publico
+  GET    /health/detalle                Estado detallado          salud.ver
+  GET    /openapi.json                  Especificacion del API    publico
+
+CONVENCIONES DE CONSULTA
+  Paginacion    pagina, porPagina (max 200)
+  Busqueda      buscar
+  Orden         orden, direccion (asc|desc). Los campos no permitidos se
+                ignoran: nunca se interpola texto libre en el SQL.
+  Periodo       desde, hasta (ISO)
+  Filtros       id_cliente, id_proyecto, id_inversor, granularidad, anio
+
+
+================================================================================
+ 11. SEGURIDAD Y CONTROL DE ACCESO
+================================================================================
+
+MODELO DE SESION
+
+    Login correcto
+        |
+        +--> Cookie as_acceso    JWT, 15 min, HttpOnly, Secure, SameSite
+        +--> Cookie as_refresco  Opaco, 7 dias, HttpOnly, Secure, SameSite
+        |       (en la base solo se guarda su hash SHA-256)
+        +--> Cookie as_csrf      Legible por el frontend (double submit)
+
+    Renovacion (POST /auth/refresh)
+        |
+        +--> Rota el refresco: el anterior queda revocado
+        +--> Si se reutiliza uno ya rotado, se invalida TODA la familia
+             de sesiones (defensa ante robo de token)
+
+    Revocacion inmediata
+        +--> Al desactivar un usuario
+        +--> Al cambiar su rol
+        +--> Al cambiar su contrasena
+        +--> Al restablecer su acceso
+
+MATRIZ RBAC RESUMIDA (33 permisos, 3 roles)
+
+  Leyenda:  X = incluido en el rol    - = no incluido    o = individual
+
+  PERMISO                      ADMIN  OPER  GEREN    PERMISO             ADMIN OPER GEREN
+  ------------------------------------------------   -------------------------------------
+  usuarios.ver                   X     -      -      proyecciones.ver      X    X    X
+  usuarios.gestionar             X     -      -      proyecciones.gestionar X   o    -
+  clientes.ver                   X     X      X      proyecciones.aprobar  X    -    -
+  clientes.gestionar             X     -      -      huawei.ver            X    X    -
+  proyectos.ver                  X     X      X      huawei.configurar     X    -    -
+  proyectos.gestionar            X     -      -      huawei.sincronizar    X    X    -
+  inversores.ver                 X     X      X      dashboard.ver         X    X    X
+  inversores.gestionar           X     X      -      reportes.ver          X    X    X
+  produccion.ver                 X     X      X      reportes.generar      X    X    X
+  produccion.registrar           X     X      -      reportes.exportar     X    X    X
+  produccion.corregir            X     -      -      auditoria.ver         X    -    -
+  importaciones.ver              X     X      X      config.ver            X    -    -
+  importaciones.cargar           X     X      -      config.gestionar      X    -    -
+  tarifas.ver                    X     X      X      salud.ver             X    -    -
+  tarifas.gestionar              X     o      -
+  tarifas.aprobar                X     -      -
+  tarifas.recalcular             X     -      -
+  tarifas.cerrar_mes             X     -      -
+  tarifas.reabrir_mes            X     -      -
+
+EL COORDINADOR DE TARIFAS
+  NO es un cuarto rol. Es un usuario OPERATIVO al que un administrador le
+  otorga individualmente el permiso tarifas.gestionar. Puede crear y editar
+  tarifas en BORRADOR, pero la APROBACION sigue siendo de un administrativo.
+
+PERMISOS EFECTIVOS
+  permisos efectivos = permisos del rol
+                     + otorgados individualmente (usuario_permisos.otorgado=1)
+                     - revocados individualmente (usuario_permisos.otorgado=0)
+
+REGLAS DE AUTORIZACION ADICIONALES
+  - Todo endpoint protegido incluye el caso de uso "Autenticar usuario".
+  - El rol gerencial NUNCA puede recibir permisos de escritura, ni siquiera
+    de forma individual: el servidor rechaza el intento.
+  - El ultimo administrador activo no puede desactivarse ni cambiar de rol.
+  - Ningun usuario puede desactivarse a si mismo.
+
+CONTROLES DE SEGURIDAD IMPLEMENTADOS
+
+  AUTENTICACION
+    bcrypt coste 12. Politica: minimo 10 caracteres con mayuscula, minuscula,
+    numero y caracter especial. Bloqueo temporal de 15 minutos tras 5 intentos
+    fallidos. Respuesta uniforme que no revela si un correo existe.
+
+  SESIONES
+    Cookies HttpOnly + Secure + SameSite. Rotacion con deteccion de reuso.
+    El token jamas se guarda en localStorage ni viaja en el cuerpo.
+
+  CSRF
+    Double submit cookie. Obligatorio en POST, PUT, PATCH y DELETE cuando la
+    sesion viaja por cookie. Comparacion en tiempo constante.
+
+  ENTRADAS
+    Validacion y normalizacion con Zod en el limite del API. Consultas
+    parametrizadas con mysql2. Los campos de ordenamiento se resuelven contra
+    una lista blanca; nunca se interpola texto libre en el SQL.
+
+  ARCHIVOS
+    Validacion de extension, tamano (10 MB) y FIRMA BINARIA REAL. Rechazo de
+    libros con macros (vbaProject.bin) y con vinculos externos. Nombre de
+    archivo generado por el servidor: nunca se confia en el del navegador.
+    Defensa contra path traversal. Neutralizacion de formulas CSV al leer.
+    Las celdas con formula se toman por su RESULTADO, nunca se ejecutan.
+
+  CABECERAS
+    CSP con default-src 'self' y frame-ancestors 'none'. HSTS en produccion.
+    X-Content-Type-Options nosniff. Referrer-Policy strict-origin.
+    x-powered-by deshabilitado.
+
+  CORS
+    Limitado al subdominio autorizado y al propio origen. Un origen no
+    autorizado no recibe cabeceras CORS, pero la peticion no se convierte en
+    error 500 (esto romperia el servicio de archivos estaticos).
+
+  RATE LIMITING
+    General sobre /api y reforzado en el inicio de sesion (20 intentos por
+    ventana de 15 minutos, mas el limitador de Nginx a 1 r/s).
+
+  SECRETOS
+    Exclusivamente en variables de entorno. .env.example sin valores reales.
+    En produccion se exige que los secretos existan y tengan 32+ caracteres.
+    La base de datos guarda solo una referencia (secreto_ref), nunca el valor.
+
+  REGISTROS
+    JSON estructurado con redaccion automatica de contrasenas, tokens y
+    cookies. Identificador de correlacion por peticion.
+
+  AUDITORIA
+    Toda accion relevante con datos antes/despues, motivo, IP y correlacion.
+    Sanitizacion recursiva: los campos sensibles quedan como [REDACTADO].
+    Nunca se registran contrasenas, tokens ni archivos completos.
+
+  MINIMO PRIVILEGIO
+    Usuario de MySQL sin GRANT OPTION. Procesos que no corren como root en
+    contenedores ni en systemd. Endurecimiento de las unidades systemd.
+
+
+================================================================================
+ 12. FLUJOS FUNCIONALES CLAVE
+================================================================================
+
+12.1 VALORIZACION MONETARIA
+
+    registro de produccion (kwh, fecha)
+            |
+            +--> se busca la tarifa APROBADA del proyecto para el
+            |    (anio, mes) de la fecha DEL PROPIO REGISTRO
+            |
+            +-- existe ----> valor_q = kwh x costo_kwh
+            |                se guardan id_tarifa y costo_kwh_aplicado
+            |                estado = VALORIZADA
+            |
+            +-- no existe -> valor_q = NULL
+                             estado = PENDIENTE_DE_TARIFA
+                             los kWh se conservan INTACTOS
+
+    En rangos multi-mes se valoriza registro por registro y luego se suma.
+    NUNCA se multiplica el total del rango por una sola tarifa.
+
+    Al aprobar una tarifa faltante se recalculan UNICAMENTE los registros
+    pendientes de ese proyecto y mes; los ya valorizados no se tocan.
+
+12.2 PREVENCION DEL DOBLE CONTEO
+
+    SITUACION                                    PREVALECE      SE IGNORA
+    ------------------------------------------------------------------------
+    Un mes con detalle por inversor y tambien    POR_INVERSOR   El consolidado
+    consolidado de proyecto                                     de ese mes
+    ------------------------------------------------------------------------
+    Un inversor con lecturas diarias y ademas    DIARIA         El registro
+    un cierre mensual del mismo mes                             MENSUAL
+    ------------------------------------------------------------------------
+
+    Implementacion: dos CTEs en services/consultasProduccion.ts
+
+      WITH niveles AS (
+        SELECT id_proyecto, anio, mes,
+               MAX(nivel_detalle = 'POR_INVERSOR') AS tiene_detalle
+          FROM produccion WHERE activo = 1
+         GROUP BY id_proyecto, anio, mes
+      ),
+      granularidades AS (
+        SELECT id_proyecto, inversor_key, anio, mes,
+               MAX(granularidad = 'DIARIA') AS tiene_diaria
+          FROM produccion WHERE activo = 1
+         GROUP BY id_proyecto, inversor_key, anio, mes
+      )
+
+    El sistema INFORMA siempre estos casos al usuario en el tablero y en las
+    consultas; nunca los resuelve en silencio.
+
+12.3 ASISTENTE DE IMPORTACION (7 pasos)
+
+    1 Destino    2 Plantilla    3 Archivo    4 Validar    5 Decisiones
+                                                |             |
+                                          no toca datos        |
+                                                               v
+                                          6 Confirmar --> 7 Resumen
+                                                |
+                                        una sola transaccion
+
+    Paso 4 detecta y reporta:
+      - Filas con error (anio invalido, mes inexistente, kWh no numerico,
+        kWh negativo, planta vacia, fecha futura o imposible)
+      - Plantas que no corresponden a ningun proyecto registrado
+      - Duplicados contra la base de datos
+      - Grupos de varias filas de una planta y mes sin identificador de inversor
+      - Conflictos de nivel de detalle (riesgo de doble conteo)
+      - Periodos cerrados
+      - Meses sin tarifa aprobada
+
+    Paso 5 exige decidir para cada grupo ambiguo:
+      SUMAR        Un unico registro consolidado con el total
+      COMPONENTES  Cada fila como componente independiente (con secuencia)
+      MAPEAR       Asignar cada fila a un inversor (requiere columna Serial)
+      RECHAZAR     Descartar el grupo para corregir el archivo
+    La decision queda registrada en la auditoria.
+
+    Paso 6 exige ademas:
+      - Aceptar explicitamente la CARGA PARCIAL si hay filas con error
+      - Confirmar explicitamente la mezcla de niveles si la hubiera
+      - Elegir la politica ante duplicados (ACTUALIZAR u OMITIR)
+
+    Garantia de consistencia: la previsualizacion persiste el lote normalizado
+    en disco y la confirmacion reutiliza EXACTAMENTE ese lote. Lo confirmado es
+    identico a lo previsualizado. Si algo falla, la transaccion se revierte por
+    completo y el lote queda FALLIDO: nunca quedan datos a medias.
+
+12.4 SINCRONIZACION HUAWEI
+
+    React
+      |
+      v
+    POST /api/integrations/huawei/sync
+      |
+      +-- 1. Valida sesion, rol, proyecto, inversor y configuracion
+      +-- 2. Verifica que la integracion este ACTIVA y el rango sea valido
+      +-- 3. Adquiere bloqueo de concurrencia (evita ejecuciones duplicadas)
+      +-- 4. Crea la ejecucion en estado EN_PROCESO
+      |
+      +-- 5. POST /huawei/production --> SERVICIO PYTHON
+      |         |
+      |         +-- autentica y consulta SmartPVMS desde la IP autorizada
+      |         +-- transforma la respuesta al formato canonico
+      |
+      +-- 6. REVALIDA en Node (el adaptador no es la unica barrera):
+      |         serial conocido, fecha valida y no futura, kWh >= 0,
+      |         periodo no cerrado
+      +-- 7. Inserta o actualiza de forma IDEMPOTENTE en MySQL
+      +-- 8. Valoriza con la tarifa del mes correspondiente
+      +-- 9. Registra metricas: recibidas, insertadas, actualizadas,
+      |         rechazadas, duracion, advertencias
+      +-- 10. Libera el bloqueo y responde con un resumen comprensible
+
+    Repetir el mismo rango ACTUALIZA los registros existentes; nunca duplica.
+
+12.5 CORRECCION DE UNA TARIFA YA UTILIZADA
+
+    1. El usuario solicita corregir            (requiere tarifas.recalcular)
+    2. El sistema EXIGE analizar el impacto primero:
+         registros afectados, kWh afectados, valor anterior, valor nuevo,
+         diferencia y si el periodo esta cerrado
+    3. El usuario indica un motivo (minimo 10 caracteres) y confirma
+    4. Se recalculan los registros dentro de una transaccion
+    5. Queda auditado el antes y el despues con el motivo
+
+    Un mes CERRADO no admite la correccion: primero debe reabrirse con motivo
+    y permiso administrativo.
+
+
+================================================================================
+ 13. REGLAS DE NEGOCIO CRITICAS
+================================================================================
+
+  R01  No se puede crear un proyecto sin cliente activo.
+  R02  No se puede crear un inversor sin proyecto activo.
+  R03  No se puede registrar produccion sin proyecto; sin inversor solo como
+       consolidado declarado explicitamente.
+  R04  A lo sumo una tarifa vigente por proyecto, anio y mes. Decimal no
+       negativa, expresada en GTQ/kWh con 6 decimales.
+  R05  valor_q SIEMPRE se deriva de kwh x costo_kwh_aplicado segun el mes de
+       la produccion. Ninguna ruta permite editarlo a mano.
+  R06  Un operativo sin tarifas.gestionar no puede crear ni modificar tarifas.
+       Aprobar, recalcular, cerrar y reabrir son permisos diferenciados.
+  R07  La ausencia de tarifa no invalida los kWh, pero deja la valorizacion
+       pendiente y debe ser visible en tableros y reportes.
+  R08  Un cambio de tarifa utilizada exige analisis de impacto, motivo,
+       confirmacion, permiso y auditoria.
+  R09  La carga y la sincronizacion son idempotentes.
+  R10  Los duplicados se detectan ANTES de confirmar y se resuelven segun una
+       politica explicita elegida por el usuario.
+  R11  Varias filas de una planta en el mismo mes NO son duplicados
+       automaticos: se analizan por inversor, nivel de detalle, origen y lote.
+  R12  No se suma produccion consolidada de proyecto con el detalle de sus
+       inversores para el mismo periodo.
+  R13  Toda importacion es transaccional: no deja lotes parcialmente
+       inconsistentes.
+  R14  Los errores de una fila no ocultan los registros validos; la carga
+       parcial se muestra y se confirma explicitamente.
+  R15  Los reportes indican zona horaria, periodo, unidades, moneda y fecha de
+       actualizacion.
+  R16  No se mezclan datos simulados con reales sin etiqueta y confirmacion
+       visible.
+  R17  Los usuarios gerenciales nunca modifican datos.
+  R18  No se aceptan kWh negativos ni fechas futuras.
+  R19  Un reporte oficial con valor monetario no puede presentarse como
+       completo si existen meses sin tarifa aprobada.
+  R20  Nunca se cambian silenciosamente los valores historicos de meses
+       cerrados.
+
+POLITICA DE REDONDEO DOCUMENTADA
+  Energia (kWh)       4 decimales al almacenar
+  Tarifa (Q/kWh)      6 decimales al almacenar
+  Valor monetario     4 decimales al almacenar, 2 al presentar
+  Metodo              half-up estable, inmune a artefactos binarios
+  Sumas de rango      Sobre los valores ya redondeados de cada registro
+
+
+================================================================================
+ 14. ESTRATEGIA DE PRUEBAS
+================================================================================
+
+PRINCIPIO
+  Las pruebas se ejecutan contra una base de datos MySQL REAL (appsolar_test),
+  creada desde cero con las MISMAS migraciones de produccion. No se simula la
+  base de datos. El unico doble es el servicio Python, sustituido por un
+  servidor HTTP que respeta su mismo contrato, para poder probar de forma
+  determinista los casos de error del fabricante.
+
+RESULTADO DE LA ULTIMA EJECUCION COMPLETA
+
+  ARCHIVO                        PRUEBAS   COBERTURA FUNCIONAL
+  --------------------------------------------------------------------------
+  autenticacion.test.ts             12     Login, bloqueo, rotacion de tokens,
+                                           CSRF, cambio de contrasena, 401
+  rbac.test.ts                      23     Matriz completa endpoint por
+                                           endpoint y rol por rol; coherencia
+                                           entre codigo y base de datos
+  tarifas.test.ts                   20     Valorizacion multi-tarifa, mes sin
+                                           tarifa, impacto, recalculo, anulacion,
+                                           cierre y reapertura, correcciones
+  importaciones.test.ts             24     Ambos formatos, validaciones,
+                                           decisiones de grupo, duplicados,
+                                           doble conteo, rollback, ciclo de vida
+  huawei.test.ts                    18     Sincronizacion, idempotencia,
+                                           credenciales, IP, limite, timeout,
+                                           bloqueo de concurrencia
+  analisis.test.ts                  16     Proyecciones, cumplimiento,
+                                           agregaciones, comparaciones,
+                                           reportes y exportacion
+  seguridad.test.ts                 18     Inyeccion SQL, XSS, formulas CSV,
+                                           path traversal, macros, secretos,
+                                           cabeceras, CORS, paginacion
+  e2e/recorrido.test.ts             11     Recorrido completo del alcance
+  --------------------------------------------------------------------------
+  TOTAL BACKEND                    142     Todas correctas
+  frontend/lib/formato.test.ts       9     Formato de presentacion
+  --------------------------------------------------------------------------
+  TOTAL                            151     Todas correctas
+
+RECORRIDO END-TO-END VERIFICADO
+   1. El administrador crea usuarios operativo, coordinador y gerencial, y
+      cada uno cambia su contrasena temporal en el primer ingreso.
+   2. Crea cliente, dos proyectos con modalidad PPA y EPC, e inversores.
+   3. Registra y aprueba la proyeccion mensual del proyecto.
+   4. El coordinador registra las tarifas; el administrador las aprueba.
+   5. El operativo carga el formato historico del Excel, con dos filas del
+      mismo mes y una fila con error, resolviendo la decision y aceptando la
+      carga parcial.
+   6. Ejecuta una sincronizacion Huawei simulada y la repite para comprobar
+      la idempotencia.
+   7. El sistema aplica la tarifa de cada periodo y calcula el valor en
+      quetzales sin perder ni duplicar informacion.
+   8. El gerencial compara proyeccion, anio anterior y anio seleccionado,
+      consulta el cumplimiento y genera un reporte imprimible en PDF.
+   9. Se comprueba que el gerencial no puede modificar ningun dato.
+  10. Se verifica que las 15 acciones relevantes quedaron auditadas y que la
+      auditoria no contiene contrasenas ni secretos.
+  11. Se verifica el estado del sistema con los datos cargados.
+
+VERIFICACION MANUAL ADICIONAL
+  Recorrido en navegador sobre la aplicacion compilada: inicio de sesion,
+  tablero con datos reales, calendario de tarifas, y registro y aprobacion de
+  la tarifa faltante desde la interfaz, comprobando que valoriza los registros
+  pendientes y que el tablero pasa de "valorizacion parcial" a cobertura
+  completa.
+
+
+================================================================================
+ 15. DESPLIEGUE E INFRAESTRUCTURA
+================================================================================
+
+DOS OPCIONES SOPORTADAS
+
+  OPCION A: DOCKER COMPOSE (recomendada)
+
+    Servicio   Imagen / build          Puertos publicados
+    ----------------------------------------------------------------
+    proxy      nginx:1.27-alpine       80, 443    <-- unico expuesto
+    backend    backend.Dockerfile      ninguno
+    python     python.Dockerfile       ninguno
+    mysql      mysql:8.0               ninguno
+
+    Volumenes: mysql_datos, cargas, certbot_webroot
+    Red: interna (bridge)
+    El backend aplica las migraciones ANTES de arrancar y crea el
+    administrador inicial. Todos los servicios tienen healthcheck y
+    restart: unless-stopped.
+
+  OPCION B: SYSTEMD (sin Docker)
+
+    appsolar-backend.service     Node.js con ExecStartPre de migraciones
+    appsolar-python.service      uvicorn ligado a 127.0.0.1
+    appsolar-respaldo.service    Respaldo puntual
+    appsolar-respaldo.timer      Diario a las 01:30 America/Guatemala
+
+    Endurecimiento aplicado: NoNewPrivileges, PrivateTmp, ProtectSystem=strict,
+    ProtectHome, ProtectKernelTunables, RestrictSUIDSGID, LockPersonality.
+    Reinicio automatico con Restart=always.
+
+NGINX
+  Redireccion HTTP a HTTPS y desafio ACME para Let's Encrypt.
+  TLS 1.2 y 1.3, HSTS, OCSP stapling.
+  Rate limiting general (20 r/s) y reforzado en el inicio de sesion (1 r/s).
+  client_max_body_size 12M, coherente con el limite de carga de 10 MB.
+  Cache larga para /assets/ (archivos con huella de contenido).
+
+CORTAFUEGOS
+  Abiertos: SSH, 80, 443.
+  Cerrados: 3306 (MySQL) y 8000 (servicio Python), siempre.
+
+ACTUALIZACION CON MINIMA INTERRUPCION
+  1. Respaldo previo obligatorio
+  2. git pull --ff-only
+  3. npm ci && npm run build          (el servicio sigue en linea)
+  4. npm run db:migrate               (migraciones aditivas)
+  5. systemctl restart appsolar-backend appsolar-python
+  6. Verificacion con /health
+
+VARIABLES DE ENTORNO
+  Documentadas en .env.example, agrupadas por servicio:
+  General, Backend, Base de datos, Seguridad y sesiones, Cargas de archivos,
+  Servicio Python, Integracion Huawei, Sincronizacion programada, Bootstrap
+  del administrador, Frontend.
+
+  ADVERTENCIA OPERATIVA: encerrar entre comillas todo valor que contenga el
+  caracter #. Sin comillas, dotenv lo interpreta como inicio de comentario y
+  la variable queda truncada.
+
+
+================================================================================
+ 16. OBSERVABILIDAD Y OPERACION
+================================================================================
+
+REGISTROS
+  Backend           JSON estructurado (pino) con redaccion de secretos
+  Servicio Python   Formato estandar de logging
+  Respaldos         /var/log/appsolar/respaldo.log
+  Nginx             appsolar_acceso.log y appsolar_error.log
+  MySQL             Consultas lentas (> 2 s) en lento.log
+  Rotacion          Diaria, 30 archivos, comprimidos
+
+TRAZABILIDAD
+  Cada peticion recibe un identificador de correlacion, devuelto en la
+  cabecera x-correlation-id y mostrado al usuario cuando ocurre un error.
+  Permite localizar el incidente exacto en los registros.
+
+PANEL DE ESTADO (GET /api/health/detalle)
+  Semaforo de API, MySQL, servicio Python e integracion Huawei.
+  Tiempo en linea, memoria, version de Node y host.
+  Tamano y numero de tablas de la base de datos.
+  Estado de la tarea programada y su ultima ejecucion.
+  Ultima sincronizacion y ultima importacion.
+  Se actualiza automaticamente cada 30 segundos en la interfaz.
+
+SONDA EXTERNA (GET /health)
+  Version publica minima. Responde 200 cuando el servicio esta operativo y
+  503 cuando MySQL no esta accesible. No revela detalles internos.
+
+RESPALDO
+  Automatico diario a las 01:30 mediante systemd timer.
+  Volcado con --single-transaction: no bloquea las tablas InnoDB.
+  Incluye rutinas, eventos y disparadores.
+  Verificacion de integridad del comprimido y huella SHA-256.
+  Respaldo tambien de los archivos de importacion.
+  Retencion configurable (30 dias por defecto).
+
+RESTAURACION
+  Verifica integridad y huella antes de proceder.
+  Exige escribir literalmente RESTAURAR para continuar.
+  Crea un respaldo de seguridad del estado actual antes de sobrescribir.
+  Verifica el numero de tablas restauradas al finalizar.
+  Recuerda aplicar las migraciones posteriores al respaldo.
+
+TAREAS PROGRAMADAS DE LA APLICACION
+  Sincronizacion Huawei   Configurable, por defecto 02:30
+  Mantenimiento           03:15: limpia tokens vencidos, bloqueos expirados y
+                          marca como EXPIRADO los lotes no confirmados en 24 h
+
+
+================================================================================
+ 17. DECISIONES DE DISENO Y SUS MOTIVOS
+================================================================================
+
+  DECISION                        ALTERNATIVA            MOTIVO
+  --------------------------------------------------------------------------
+  Cookies HttpOnly + CSRF         JWT en localStorage    El alcance exige no
+  double submit                                          guardar tokens
+                                                         sensibles en
+                                                         localStorage; queda
+                                                         fuera del alcance de
+                                                         un XSS
+  --------------------------------------------------------------------------
+  bcrypt coste 12                 Argon2id               El alcance admite
+                                                         ambos; bcrypt evita
+                                                         dependencias nativas
+                                                         y despliega igual en
+                                                         Windows, Linux y
+                                                         Docker
+  --------------------------------------------------------------------------
+  Migraciones SQL con             ORM con migraciones    Esquema auditable, sin
+  ejecutor propio                 generadas              abstraccion que oculte
+                                                         restricciones
+  --------------------------------------------------------------------------
+  Consultas parametrizadas        ORM completo           Control explicito de
+  con mysql2                                             las CTEs de
+                                                         anti-doble-conteo
+  --------------------------------------------------------------------------
+  dateStrings: true en el pool    Conversion a Date      Evita desplazamientos
+                                                         de zona horaria entre
+                                                         Node y MySQL
+  --------------------------------------------------------------------------
+  Columna generada                Indice parcial         MySQL no admite
+  clave_vigente                                          indices parciales;
+                                                         permite historial de
+                                                         tarifas anuladas
+  --------------------------------------------------------------------------
+  Campo secuencia en produccion   Descartar filas        Varias filas de una
+                                  repetidas              planta y mes NO son
+                                                         duplicados automaticos
+  --------------------------------------------------------------------------
+  Lote persistido entre           Reprocesar el archivo  Garantiza que lo
+  previsualizacion y confirmacion al confirmar           confirmado es identico
+                                                         a lo previsualizado
+  --------------------------------------------------------------------------
+  Servicio Python separado        Integracion dentro     Aisla la integracion y
+                                  de Node                permite autorizar una
+                                                         sola IP saliente
+  --------------------------------------------------------------------------
+  PDF con PDFKit                  Navegador sin cabeza   Menor superficie de
+                                  (Puppeteer)            ataque y despliegue
+                                                         mucho mas liviano
+  --------------------------------------------------------------------------
+  Factores ambientales en la      Constantes en codigo   El alcance prohibe
+  tabla configuracion                                    constantes ocultas;
+                                                         declaran unidad y
+                                                         fuente
+  --------------------------------------------------------------------------
+
+
+================================================================================
+ 18. ESTADO ACTUAL, SUPUESTOS Y LIMITACIONES
+================================================================================
+
+ESTADO
+  Implementado, verificado y desplegable. 151 pruebas automatizadas correctas.
+  Verificacion manual en navegador de los flujos principales.
+
+SUPUESTOS ADOPTADOS
+  S01  El nombre del proyecto es unico y coincide con la columna Planta del
+       Excel historico: es el unico identificador disponible en ese formato.
+  S02  La produccion del formato historico es mensual y se ancla al dia 1.
+  S03  Un mes puede tener a lo sumo una tarifa vigente por proyecto.
+  S04  El coordinador es un usuario operativo con tarifas.gestionar.
+  S05  Zona horaria fija America/Guatemala, sin horario de verano.
+  S06  Redondeo half-up con la precision documentada en la seccion 13.
+  S07  No se aceptan produccion con fecha futura ni kWh negativos.
+  S08  Cuando coexisten dos niveles de detalle, prevalece el mas granular.
+  S09  Cuando coexisten dos granularidades, prevalece la diaria.
+  S10  La comparacion por defecto es contra el periodo anterior equivalente:
+       el alcance prohibe inventar una "produccion esperada" inexistente.
+  S11  Los factores ambientales son configurables con unidad y fuente.
+  S12  El servicio Python no accede a MySQL.
+
+LIMITACIONES CONOCIDAS
+  L01  La integracion Huawei opera en MODO SIMULADO por defecto. El adaptador
+       real esta implementado y probado contra un doble que respeta su
+       contrato, pero NO ha sido ejecutado contra la plataforma real del
+       fabricante: eso requiere credenciales validas y que Huawei autorice
+       previamente la IP publica del VPS.
+  L02  Un solo fabricante implementado (Huawei), conforme al alcance.
+  L03  La opcion MAPEAR del asistente requiere que el archivo traiga columna
+       Inversor o Serial. La asignacion manual fila por fila desde la interfaz
+       no esta implementada; el asistente lo indica al usuario.
+  L04  Sin portal publico para clientes finales (excluido del alcance).
+  L05  Sin inteligencia artificial ni redes neuronales (excluido del alcance).
+  L06  Las pruebas end-to-end son a nivel de API contra MySQL real. No hay
+       automatizacion de navegador; la interfaz se verifico manualmente.
+  L07  Exportacion limitada a PDF, XLSX y CSV. Sin Word ni envio por correo.
+  L08  Un solo idioma (espanol), sin infraestructura de internacionalizacion.
+  L09  La sincronizacion programada es de alcance global por integracion, no
+       por proyecto individual.
+  L10  Sin alta disponibilidad: el diseno asume un unico VPS, sin replicacion
+       de MySQL ni balanceo entre instancias.
+
+PASOS PARA ACTIVAR LA INTEGRACION HUAWEI REAL
+  1. Obtener la IP publica de salida del VPS: curl -s https://api.ipify.org
+  2. Solicitar a Huawei el registro y autorizacion de esa IP para la cuenta
+     northbound.
+  3. Definir en el entorno del servicio Python: HUAWEI_USERNAME,
+     HUAWEI_SYSTEM_CODE, HUAWEI_AUTHORIZED_IP y HUAWEI_MODE=real.
+  4. Reiniciar el servicio Python.
+  5. En la aplicacion: Integracion Huawei > Configurar > Modo REAL,
+     registrando la IP autorizada (el sistema rechaza el cambio si falta).
+  6. Ejecutar Probar conexion. El adaptador compara la IP de salida real con
+     la autorizada y avisa si no coinciden.
+  7. Sincronizar un rango corto y verificar los datos antes de habilitar el
+     modo programado.
+
+DEUDA TECNICA SUGERIDA PARA PROXIMAS VERSIONES
+  - Automatizacion de pruebas de interfaz con navegador (Playwright).
+  - Mapeo fila a inversor desde la propia interfaz del asistente.
+  - Notificaciones por correo ante sincronizaciones fallidas o meses sin
+    tarifa.
+  - Exportacion programada y envio automatico a gerencia.
+  - Replicacion de MySQL y despliegue en mas de una instancia.
+
+
+================================================================================
+ 19. METRICAS DEL ENTREGABLE
+================================================================================
+
+  AREA                       ARCHIVOS      LINEAS
+  --------------------------------------------------------------------------
+  backend/src                     43       10,423
+  backend/tests                   10        3,473
+  frontend/src                    30        9,829
+  python-service/app               6          786
+  database                        12          959
+  docs                             9        2,012
+  infra                           11          481
+  --------------------------------------------------------------------------
+  TOTAL VERSIONADO               136       ~36,000
+
+  COMPONENTES
+  --------------------------------------------------------------------------
+  Tablas de base de datos                        22 (+1 de control)
+  Migraciones                                     5
+  Permisos                                       33
+  Roles                                           3
+  Rutas del API                                  60
+  Operaciones documentadas en OpenAPI            75
+  Modulos de dominio del backend                 13
+  Servicios transversales                        11
+  Pantallas del frontend                         16
+  Componentes reutilizables                       5
+  Pruebas automatizadas                         151
+  Documentos de documentacion                     9 + README + este archivo
+  Unidades de infraestructura                    11
+
+
+================================================================================
+ 20. GLOSARIO
+================================================================================
+
+  kWh                     Kilovatio-hora. Unidad de ENERGIA generada.
+  kWp                     Kilovatio-pico. Unidad de POTENCIA INSTALADA.
+                          Nunca se usa para etiquetar generacion acumulada.
+  GTQ / Q                 Quetzal guatemalteco.
+  PPA                     Power Purchase Agreement. Modalidad comercial.
+  EPC                     Engineering, Procurement and Construction.
+  SmartPVMS               Plataforma de gestion fotovoltaica de Huawei
+                          (FusionSolar). Su API se llama northbound.
+  Nivel de detalle        POR_INVERSOR o PROYECTO_CONSOLIDADO. Determina si un
+                          registro es atribuible a un equipo concreto.
+  Granularidad            DIARIA o MENSUAL. Frecuencia del registro.
+  Secuencia               Numero que distingue componentes legitimos de un
+                          mismo periodo sin tratarlos como duplicados.
+  Pendiente de tarifa     Registro con kWh validos cuyo mes aun no tiene
+                          tarifa aprobada. Su valor monetario es desconocido,
+                          NO es cero.
+  Cobertura tarifaria     Proporcion de meses del periodo con tarifa aprobada.
+                          Un reporte con cobertura parcial no es oficial.
+  Cumplimiento            generacion real / proyeccion x 100.
+  Idempotencia            Repetir la misma operacion no cambia el resultado:
+                          actualiza en lugar de duplicar.
+  Modo MOCK / sandbox     Datos simulados, deterministas y claramente
+                          etiquetados. Nunca provienen del fabricante.
+  Double submit cookie    Patron de proteccion CSRF: el token viaja a la vez
+                          en una cookie legible y en una cabecera.
+  CTE                     Common Table Expression. Subconsulta con nombre,
+                          usada aqui para resolver el anti-doble-conteo.
+
+
+================================================================================
+ REFERENCIAS
+================================================================================
+
+  README.md                        Instalacion local y produccion
+  docs/arquitectura.md             Version extendida en Markdown
+  docs/modelo-datos.md             Detalle de tablas, indices y unicidad
+  docs/matriz-permisos.md          RBAC completo permiso por permiso
+  docs/manual-usuario.md           Guia paso a paso por rol
+  docs/manual-tecnico.md           Como mantener y extender el sistema
+  docs/despliegue.md               VPS, HTTPS, Docker o systemd
+  docs/operacion.md                Respaldo, restauracion e incidentes
+  docs/supuestos-limitaciones.md   Alcance real y activacion de Huawei
+  docs/openapi.json                Especificacion completa del API
+
+  La especificacion OpenAPI tambien se sirve en linea en:
+      GET /api/openapi.json
+
+================================================================================
+ FIN DEL DOCUMENTO
+================================================================================
