@@ -61,9 +61,11 @@ interface ReporteGenerado {
   porProyecto: Array<{ id_proyecto: number; proyecto: string; cliente: string; kwh: number; valor_q: number; pendientes: number }>;
   porInversor: Array<{ id_inversor: number; inversor: string; proyecto: string; kwh: number; valor_q: number; ultima_fecha: string | null }>;
   cobertura: {
-    mesesConTarifa: Array<{ anio: number; mes: number; costo_kwh: number }>;
-    mesesPendientes: Array<{ anio: number; mes: number }>;
+    /** La tarifa del kWh tiene vigencia TRIMESTRAL. */
+    trimestresConTarifa: Array<{ anio: number; trimestre: number; etiqueta: string; costo_kwh: number }>;
+    trimestresPendientes: Array<{ anio: number; trimestre: number; etiqueta: string }>;
     registrosPendientes: number;
+    kwhPendientes: number;
     completa: boolean;
   };
   resumenAnual: { totales: Record<string, number | null> };
@@ -360,14 +362,22 @@ export function PaginaReportes() {
                   {porcentaje(generado.resumenAnual.totales.cumplimiento_anio_seleccionado)}
                 </p>
               </div>
-              <div className={generado.cobertura.mesesPendientes.length > 0 ? 'indicador indicador--ambar' : 'indicador indicador--verde'}>
+              <div
+                className={
+                  generado.cobertura.trimestresPendientes.length > 0
+                    ? 'indicador indicador--ambar'
+                    : 'indicador indicador--verde'
+                }
+              >
                 <p className="indicador__etiqueta">Cobertura tarifaria</p>
                 <p className="indicador__valor">
-                  {generado.cobertura.mesesConTarifa.length}/
-                  {generado.cobertura.mesesConTarifa.length + generado.cobertura.mesesPendientes.length}
+                  {generado.cobertura.trimestresConTarifa.length}/
+                  {generado.cobertura.trimestresConTarifa.length +
+                    generado.cobertura.trimestresPendientes.length}
                 </p>
                 <p className="indicador__detalle">
-                  {generado.cobertura.registrosPendientes} registro(s) sin valorizar
+                  trimestre(s) con tarifa · {generado.cobertura.registrosPendientes} registro(s) sin
+                  valorizar
                 </p>
               </div>
             </section>

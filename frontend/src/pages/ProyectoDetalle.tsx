@@ -64,9 +64,9 @@ interface DetalleProyecto {
   } | null;
 }
 
-interface TarifaMes {
+interface TarifaTrimestre {
   id_tarifa: number;
-  mes: number;
+  trimestre: number;
   costo_kwh: number;
   moneda: string;
   estado: string;
@@ -79,25 +79,47 @@ interface TarifaMes {
 }
 
 interface FilaCalendarioTarifa {
-  mes: number;
-  mesNombre: string;
-  tarifa: TarifaMes | null;
-  cerrado: boolean;
+  trimestre: number;
+  /** "I trimestre", "II trimestre"... */
+  etiqueta: string;
+  /** "Enero a Marzo" */
+  meses: string;
+  mesesNumeros: number[];
+  mesesNombres: string[];
+  tarifa: TarifaTrimestre | null;
+  /** El cierre contable sigue siendo mensual. */
+  mesesCerrados: number[];
+  cerradoParcial: boolean;
+  cerradoCompleto: boolean;
   registrosProduccion: number;
   registrosPendientes: number;
   kwh: number;
   requiereAtencion: boolean;
 }
 
+/** Aviso de que toca actualizar la tarifa del kWh de este trimestre. */
+interface AlertaTrimestral {
+  trimestreActual: { anio: number; trimestre: number; etiqueta: string };
+  trimestreSiguiente: { anio: number; trimestre: number; etiqueta: string };
+  diasRestantes: number;
+  diasDeAviso: number;
+  proyectosSinTarifaActual: Array<{ id_proyecto: number; proyecto: string }>;
+  proyectosSinTarifaSiguiente: Array<{ id_proyecto: number; proyecto: string }>;
+  requiereAtencion: boolean;
+  mensaje: string | null;
+}
+
 interface RespuestaTarifas {
   anio: number;
   id_proyecto: number;
+  periodicidad: 'TRIMESTRAL';
   calendario: FilaCalendarioTarifa[];
+  alerta: AlertaTrimestral;
   resumen: {
-    mesesAprobados: number;
-    mesesBorrador: number;
-    mesesSinTarifa: number;
-    mesesConProduccionSinTarifa: number;
+    trimestresAprobados: number;
+    trimestresBorrador: number;
+    trimestresSinTarifa: number;
+    trimestresConProduccionSinTarifa: number;
   };
 }
 
@@ -135,7 +157,9 @@ interface RespuestaProyecciones {
 interface Impacto {
   id_tarifa: number;
   anio: number;
-  mes: number;
+  trimestre: number;
+  etiqueta: string;
+  mesesCerrados: number[];
   costoActual: number;
   costoPropuesto: number;
   registrosAfectados: number;
@@ -143,11 +167,48 @@ interface Impacto {
   valorAnterior: number;
   valorNuevo: number;
   diferencia: number;
-  mesCerrado: boolean;
   advertencia: string;
 }
 
-type Pestana = 'resumen' | 'tarifas' | 'proyecciones';
+// --- Etiquetas de los trimestres, en el mismo orden que usa el servidor ----
+const ROMANOS = ['I', 'II', 'III', 'IV'];
+
+function etiquetaTrimestre(trimestre: number): string {
+  return `${ROMANOS[trimestre - 1] ?? trimestre} trimestre`;
+}
+
+function mesesDelTrimestre(trimestre: number): string {
+  const primero = (trimestre - 1) * 3 + 1;
+  return `${nombreMes(primero)} a ${nombreMes(primero + 2)}`;
+}
+
+/** Grupo de inversores: nivel intermedio entre el proyecto y el equipo. */
+interface Grupo {
+  id_grupo: number;
+  nombre: string;
+  cantidad_inversores_declarada: number | null;
+  inversores_registrados: number;
+  inversoresFaltantes: number;
+  avisoInversores: string | null;
+  tiene_banco_baterias: number;
+  capacidad_baterias_kwh: number | null;
+  capacidad_kwp: number | null;
+  ubicacion: string | null;
+  observaciones: string | null;
+  activo: number;
+  kwh_total: number;
+  ultima_produccion: string | null;
+}
+
+interface TotalesGrupos {
+  grupos: number;
+  inversoresRegistrados: number;
+  inversoresDeclarados: number;
+  gruposConBaterias: number;
+  capacidadBateriasKwh: number;
+}
+
+type Pestana = 'resumen' | 'grupos' | 'tarifas' | 'proyecciones';
 
 // ---------------------------------------------------------------------------
 // Pagina
@@ -194,6 +255,7 @@ export function PaginaProyectoDetalle() {
         <ul className="pasos" style={{ marginBottom: '1rem' }}>
           {([
             ['resumen', 'Resumen e inversores'],
+            ['grupos', 'Grupos de inversores'],
             ['tarifas', 'Tarifas de energia'],
             ['proyecciones', 'Proyecciones mensuales'],
           ] as Array<[Pestana, string]>).map(([clave, texto]) => (
@@ -218,6 +280,7 @@ export function PaginaProyectoDetalle() {
       </nav>
 
       {pestana === 'resumen' ? <Resumen proyecto={p} /> : null}
+      {pestana === 'grupos' ? <PanelGrupos idProyecto={idProyecto} /> : null}
       {pestana === 'tarifas' ? (
         puede('tarifas.ver') ? <PanelTarifas idProyecto={idProyecto} /> : <SinPermiso permiso="tarifas.ver" />
       ) : null}
@@ -318,6 +381,399 @@ function Resumen({ proyecto }: { proyecto: DetalleProyecto }) {
 }
 
 // ---------------------------------------------------------------------------
+// Grupos de inversores
+//
+// Jerarquia del sistema:  PROYECTO -> GRUPO -> INVERSOR
+// Un proyecto tiene varios grupos y cada grupo agrupa varios inversores con
+// sus seriales. El grupo declara cuantos equipos deberia tener y si cuenta con
+// banco de baterias, y es la unidad sobre la que se carga produccion manual
+// cuando falla la conexion con el fabricante.
+// ---------------------------------------------------------------------------
+
+const GRUPO_FORMULARIO = {
+  nombre: '',
+  cantidad_inversores_declarada: '',
+  tiene_banco_baterias: false,
+  capacidad_baterias_kwh: '',
+  capacidad_kwp: '',
+  ubicacion: '',
+  observaciones: '',
+  activo: true,
+};
+
+function PanelGrupos({ idProyecto }: { idProyecto: number }) {
+  const { puede } = useSesion();
+  const clienteConsultas = useQueryClient();
+  const [formulario, setFormulario] = useState<typeof GRUPO_FORMULARIO | null>(null);
+  const [editando, setEditando] = useState<number | null>(null);
+  const [aEliminar, setAEliminar] = useState<Grupo | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [exito, setExito] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+
+  const gestionar = puede('inversores.gestionar');
+
+  const consulta = useQuery({
+    queryKey: ['grupos', idProyecto],
+    queryFn: async () => {
+      const respuesta = await api.obtener<Grupo[]>(`/projects/${idProyecto}/groups`);
+      return {
+        grupos: respuesta.datos,
+        totales: (respuesta.meta?.totales ?? null) as TotalesGrupos | null,
+      };
+    },
+  });
+
+  const refrescar = () => {
+    void consulta.refetch();
+    void clienteConsultas.invalidateQueries({ queryKey: ['proyecto', idProyecto] });
+    void clienteConsultas.invalidateQueries({ queryKey: ['catalogo', 'grupos'] });
+  };
+
+  const guardar = async (evento: FormEvent) => {
+    evento.preventDefault();
+    if (!formulario) return;
+    setOcupado(true);
+    setError(null);
+    try {
+      const cuerpo = {
+        nombre: formulario.nombre,
+        cantidad_inversores_declarada:
+          formulario.cantidad_inversores_declarada === ''
+            ? null
+            : Number(formulario.cantidad_inversores_declarada),
+        tiene_banco_baterias: formulario.tiene_banco_baterias,
+        capacidad_baterias_kwh:
+          formulario.capacidad_baterias_kwh === '' ? null : Number(formulario.capacidad_baterias_kwh),
+        capacidad_kwp: formulario.capacidad_kwp === '' ? null : Number(formulario.capacidad_kwp),
+        ubicacion: formulario.ubicacion || null,
+        observaciones: formulario.observaciones || null,
+        activo: formulario.activo,
+      };
+      const respuesta = editando
+        ? await api.actualizar<{ mensaje: string }>(`/projects/${idProyecto}/groups/${editando}`, cuerpo)
+        : await api.crear<{ mensaje: string }>(`/projects/${idProyecto}/groups`, cuerpo);
+      setExito(respuesta.datos.mensaje);
+      setFormulario(null);
+      refrescar();
+    } catch (fallo) {
+      setError(fallo);
+    } finally {
+      setOcupado(false);
+    }
+  };
+
+  const eliminar = async () => {
+    if (!aEliminar) return;
+    setOcupado(true);
+    try {
+      const respuesta = await api.eliminar<{ mensaje: string }>(
+        `/projects/${idProyecto}/groups/${aEliminar.id_grupo}`,
+      );
+      setExito(respuesta.datos.mensaje);
+      setAEliminar(null);
+      refrescar();
+    } catch (fallo) {
+      setError(fallo);
+      setAEliminar(null);
+    } finally {
+      setOcupado(false);
+    }
+  };
+
+  const erroresCampo = error instanceof ErrorApi ? error.erroresPorCampo : {};
+  const grupos = consulta.data?.grupos ?? [];
+  const totales = consulta.data?.totales ?? null;
+  const conAviso = grupos.filter((g) => g.avisoInversores !== null);
+
+  return (
+    <>
+      {exito ? <MensajeExito>{exito}</MensajeExito> : null}
+      {error && !formulario ? <MensajeError error={error} /> : null}
+
+      <section className="tarjeta">
+        <div className="tarjeta__titulo">
+          <h2>Grupos de inversores</h2>
+          {gestionar ? (
+            <button
+              type="button"
+              className="boton no-imprimir"
+              onClick={() => {
+                setEditando(null);
+                setError(null);
+                setFormulario({ ...GRUPO_FORMULARIO });
+              }}
+            >
+              Nuevo grupo
+            </button>
+          ) : null}
+        </div>
+
+        <MensajeInfo>
+          Cada proyecto se organiza en <strong>grupos</strong> y cada grupo agrupa varios{' '}
+          <strong>inversores</strong> con sus seriales. El grupo declara cuantos equipos deberia tener y
+          si cuenta con banco de baterias. Ademas es la unidad sobre la que se puede{' '}
+          <strong>cargar produccion manualmente</strong> cuando el fabricante no entrega datos.
+        </MensajeInfo>
+
+        {conAviso.length > 0 ? (
+          <MensajeAlerta titulo="Hay grupos con equipo pendiente de registrar">
+            <ul style={{ margin: '0.3rem 0 0 1rem' }}>
+              {conAviso.map((g) => (
+                <li key={g.id_grupo}>
+                  <strong>{g.nombre}</strong>: {g.avisoInversores}
+                </li>
+              ))}
+            </ul>
+          </MensajeAlerta>
+        ) : null}
+
+        {totales ? (
+          <section className="rejilla">
+            <div className="indicador">
+              <p className="indicador__etiqueta">Grupos</p>
+              <p className="indicador__valor">{totales.grupos}</p>
+            </div>
+            <div className="indicador">
+              <p className="indicador__etiqueta">Inversores registrados</p>
+              <p className="indicador__valor">{totales.inversoresRegistrados}</p>
+              <p className="indicador__detalle">
+                de {totales.inversoresDeclarados} declarado(s)
+              </p>
+            </div>
+            <div className="indicador">
+              <p className="indicador__etiqueta">Grupos con banco de baterias</p>
+              <p className="indicador__valor">{totales.gruposConBaterias}</p>
+              <p className="indicador__detalle">{kwh(totales.capacidadBateriasKwh)} de capacidad</p>
+            </div>
+          </section>
+        ) : null}
+
+        <Tabla<Grupo>
+          titulo="Listado de grupos"
+          descripcion="Un grupo con inversores o produccion asociada se desactiva en lugar de eliminarse."
+          columnas={[
+            { clave: 'nombre', titulo: 'Grupo', render: (g) => g.nombre },
+            {
+              clave: 'inversores',
+              titulo: 'Inversores',
+              numerica: true,
+              render: (g) => (
+                <span>
+                  {g.inversores_registrados}
+                  {g.cantidad_inversores_declarada !== null
+                    ? ` de ${g.cantidad_inversores_declarada}`
+                    : ''}
+                  {g.inversoresFaltantes > 0 ? (
+                    <div>
+                      <span className="etiqueta etiqueta--ambar">
+                        faltan {g.inversoresFaltantes}
+                      </span>
+                    </div>
+                  ) : null}
+                </span>
+              ),
+            },
+            {
+              clave: 'baterias',
+              titulo: 'Banco de baterias',
+              render: (g) =>
+                g.tiene_banco_baterias ? (
+                  <span className="etiqueta etiqueta--verde">
+                    Si · {kwh(g.capacidad_baterias_kwh ?? 0)}
+                  </span>
+                ) : (
+                  <span className="etiqueta etiqueta--gris">No</span>
+                ),
+            },
+            { clave: 'kwp', titulo: 'Potencia', numerica: true, render: (g) => kwp(g.capacidad_kwp) },
+            { clave: 'ubicacion', titulo: 'Ubicacion', render: (g) => g.ubicacion ?? '—' },
+            {
+              clave: 'produccion',
+              titulo: 'Produccion acumulada',
+              numerica: true,
+              render: (g) => kwh(g.kwh_total),
+            },
+            { clave: 'ultima', titulo: 'Ultimo dato', render: (g) => fecha(g.ultima_produccion) },
+            {
+              clave: 'estado',
+              titulo: 'Estado',
+              render: (g) => (
+                <span className={g.activo ? 'etiqueta etiqueta--verde' : 'etiqueta etiqueta--gris'}>
+                  {g.activo ? 'Activo' : 'Inactivo'}
+                </span>
+              ),
+            },
+            {
+              clave: 'acciones',
+              titulo: 'Acciones',
+              render: (g) => (
+                <div className="acciones no-imprimir">
+                  <Link
+                    className="boton boton--secundario boton--pequeno"
+                    to={`/inversores?id_grupo=${g.id_grupo}`}
+                  >
+                    Ver inversores
+                  </Link>
+                  {gestionar ? (
+                    <>
+                      <button
+                        type="button"
+                        className="boton boton--secundario boton--pequeno"
+                        onClick={() => {
+                          setEditando(g.id_grupo);
+                          setError(null);
+                          setFormulario({
+                            nombre: g.nombre,
+                            cantidad_inversores_declarada:
+                              g.cantidad_inversores_declarada === null
+                                ? ''
+                                : String(g.cantidad_inversores_declarada),
+                            tiene_banco_baterias: Boolean(g.tiene_banco_baterias),
+                            capacidad_baterias_kwh:
+                              g.capacidad_baterias_kwh === null ? '' : String(g.capacidad_baterias_kwh),
+                            capacidad_kwp: g.capacidad_kwp === null ? '' : String(g.capacidad_kwp),
+                            ubicacion: g.ubicacion ?? '',
+                            observaciones: g.observaciones ?? '',
+                            activo: Boolean(g.activo),
+                          });
+                        }}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="boton boton--peligro boton--pequeno"
+                        onClick={() => setAEliminar(g)}
+                      >
+                        Baja
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ),
+            },
+          ]}
+          filas={grupos}
+          claveFila={(g) => g.id_grupo}
+          cargando={consulta.isLoading}
+          error={consulta.error}
+          alReintentar={() => void consulta.refetch()}
+          vacioTitulo="Este proyecto aun no tiene grupos"
+          vacioDescripcion="Cree al menos un grupo antes de registrar los inversores del proyecto."
+        />
+      </section>
+
+      {formulario ? (
+        <Modal
+          titulo={editando ? 'Editar grupo de inversores' : 'Nuevo grupo de inversores'}
+          alCerrar={() => setFormulario(null)}
+        >
+          {error ? <MensajeError error={error} /> : null}
+          <form onSubmit={guardar} noValidate>
+            <div className="formulario">
+              <CampoTexto
+                etiqueta="Nombre del grupo"
+                obligatorio
+                placeholder="Ej. Bloque A - Campo norte"
+                value={formulario.nombre}
+                error={erroresCampo.nombre}
+                onChange={(e) => setFormulario({ ...formulario, nombre: e.target.value })}
+              />
+              <CampoTexto
+                etiqueta="Cantidad de inversores del grupo"
+                type="number"
+                min="0"
+                step="1"
+                value={formulario.cantidad_inversores_declarada}
+                error={erroresCampo.cantidad_inversores_declarada}
+                ayuda="Cuantos equipos lleva el grupo. El sistema avisa si faltan por registrar."
+                onChange={(e) =>
+                  setFormulario({ ...formulario, cantidad_inversores_declarada: e.target.value })
+                }
+              />
+              <CampoTexto
+                etiqueta="Potencia del grupo (kWp)"
+                type="number"
+                min="0"
+                step="0.001"
+                value={formulario.capacidad_kwp}
+                onChange={(e) => setFormulario({ ...formulario, capacidad_kwp: e.target.value })}
+              />
+              <CampoTexto
+                etiqueta="Ubicacion"
+                value={formulario.ubicacion}
+                onChange={(e) => setFormulario({ ...formulario, ubicacion: e.target.value })}
+              />
+              <CampoCasilla
+                etiqueta="Cuenta con banco de baterias"
+                checked={formulario.tiene_banco_baterias}
+                onChange={(e) =>
+                  setFormulario({
+                    ...formulario,
+                    tiene_banco_baterias: e.target.checked,
+                    capacidad_baterias_kwh: e.target.checked ? formulario.capacidad_baterias_kwh : '',
+                  })
+                }
+              />
+              <CampoTexto
+                etiqueta="Capacidad del banco (kWh)"
+                type="number"
+                min="0"
+                step="0.01"
+                disabled={!formulario.tiene_banco_baterias}
+                value={formulario.capacidad_baterias_kwh}
+                error={erroresCampo.capacidad_baterias_kwh}
+                ayuda="Solo aplica si el grupo tiene banco de baterias."
+                onChange={(e) =>
+                  setFormulario({ ...formulario, capacidad_baterias_kwh: e.target.value })
+                }
+              />
+              <CampoArea
+                etiqueta="Observaciones"
+                value={formulario.observaciones}
+                onChange={(e) => setFormulario({ ...formulario, observaciones: e.target.value })}
+              />
+              <CampoCasilla
+                etiqueta="Grupo activo"
+                ancho
+                checked={formulario.activo}
+                onChange={(e) => setFormulario({ ...formulario, activo: e.target.checked })}
+              />
+            </div>
+            <div className="acciones" style={{ marginTop: '1.1rem', justifyContent: 'flex-end' }}>
+              <button type="button" className="boton boton--secundario" onClick={() => setFormulario(null)}>
+                Cancelar
+              </button>
+              <button type="submit" className="boton" disabled={ocupado}>
+                {ocupado ? 'Guardando...' : 'Guardar grupo'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
+
+      {aEliminar ? (
+        <Confirmacion
+          titulo="Dar de baja el grupo"
+          peligroso
+          ocupado={ocupado}
+          textoConfirmar="Continuar"
+          descripcion={
+            <p>
+              Si <strong>{aEliminar.nombre}</strong> tiene inversores o produccion registrada, el sistema
+              lo desactivara en lugar de eliminarlo, para conservar el historico energetico.
+            </p>
+          }
+          alConfirmar={eliminar}
+          alCancelar={() => setAEliminar(null)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tarifas de energia
 // ---------------------------------------------------------------------------
 
@@ -328,12 +784,18 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
   const [exito, setExito] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
-  const [nueva, setNueva] = useState<{ mes: number; costo: string; motivo: string; aprobar: boolean } | null>(null);
-  const [correccion, setCorreccion] = useState<{ fila: FilaCalendarioTarifa; costo: string; motivo: string } | null>(null);
+  const [nueva, setNueva] = useState<
+    { trimestre: number; costo: string; motivo: string; aprobar: boolean } | null
+  >(null);
+  const [correccion, setCorreccion] = useState<
+    { fila: FilaCalendarioTarifa; costo: string; motivo: string } | null
+  >(null);
   const [impacto, setImpacto] = useState<Impacto | null>(null);
   const [copiar, setCopiar] = useState<FilaCalendarioTarifa | null>(null);
   const [anular, setAnular] = useState<{ fila: FilaCalendarioTarifa; motivo: string } | null>(null);
-  const [cierre, setCierre] = useState<{ fila: FilaCalendarioTarifa; abrir: boolean; motivo: string } | null>(null);
+  const [cierre, setCierre] = useState<
+    { fila: FilaCalendarioTarifa; mes: number; abrir: boolean; motivo: string } | null
+  >(null);
 
   const gestionar = puede('tarifas.gestionar');
   const aprobar = puede('tarifas.aprobar');
@@ -378,9 +840,22 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
       {exito ? <MensajeExito>{exito}</MensajeExito> : null}
       {error ? <MensajeError error={error} /> : null}
 
+      {/* Aviso de actualizacion trimestral: el costo del kWh se pacta cada
+          trimestre, asi que el sistema recuerda registrarlo a tiempo. */}
+      {datos?.alerta?.requiereAtencion && datos.alerta.mensaje ? (
+        <MensajeAlerta titulo="Actualizacion trimestral de la tarifa pendiente">
+          {datos.alerta.mensaje}
+          <p style={{ marginTop: '0.4rem', fontSize: '0.8rem' }}>
+            Trimestre en curso: <strong>{datos.alerta.trimestreActual.etiqueta}</strong> · quedan{' '}
+            {datos.alerta.diasRestantes} dia(s) · el siguiente es{' '}
+            {datos.alerta.trimestreSiguiente.etiqueta}.
+          </p>
+        </MensajeAlerta>
+      ) : null}
+
       <section className="tarjeta">
         <div className="tarjeta__titulo">
-          <h2>Tarifas de energia (Q por kWh)</h2>
+          <h2>Tarifas de energia (Q por kWh) · vigencia trimestral</h2>
           <div className="acciones no-imprimir">
             <CampoSelect etiqueta="Anio" value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
               {anios.map((a) => (
@@ -391,39 +866,49 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
         </div>
 
         <MensajeInfo>
-          Solo una tarifa <strong>APROBADA</strong> puede usarse en reportes oficiales. Si un mes no tiene
-          tarifa, la energia se conserva y el valor economico queda <strong>pendiente de tarifa</strong>:
-          nunca se asume cero ni se arrastra la tarifa del mes anterior.
+          El costo del kWh se pacta <strong>por trimestre calendario</strong>: los tres meses de un
+          trimestre comparten siempre la misma tarifa. Solo una tarifa <strong>APROBADA</strong> puede
+          usarse en reportes oficiales. Si un trimestre no tiene tarifa, la energia se conserva y su
+          valor economico queda <strong>pendiente de tarifa</strong>: nunca se asume cero ni se arrastra
+          la tarifa del trimestre anterior.
         </MensajeInfo>
 
         {datos ? (
           <>
             <section className="rejilla">
               <div className="indicador indicador--verde">
-                <p className="indicador__etiqueta">Meses aprobados</p>
-                <p className="indicador__valor">{datos.resumen.mesesAprobados}</p>
+                <p className="indicador__etiqueta">Trimestres aprobados</p>
+                <p className="indicador__valor">{datos.resumen.trimestresAprobados}</p>
+                <p className="indicador__detalle">de 4 en el anio {anio}</p>
               </div>
               <div className="indicador indicador--ambar">
                 <p className="indicador__etiqueta">En borrador</p>
-                <p className="indicador__valor">{datos.resumen.mesesBorrador}</p>
+                <p className="indicador__valor">{datos.resumen.trimestresBorrador}</p>
               </div>
               <div className="indicador">
                 <p className="indicador__etiqueta">Sin tarifa</p>
-                <p className="indicador__valor">{datos.resumen.mesesSinTarifa}</p>
+                <p className="indicador__valor">{datos.resumen.trimestresSinTarifa}</p>
               </div>
-              <div className={datos.resumen.mesesConProduccionSinTarifa > 0 ? 'indicador indicador--rojo' : 'indicador'}>
+              <div
+                className={
+                  datos.resumen.trimestresConProduccionSinTarifa > 0
+                    ? 'indicador indicador--rojo'
+                    : 'indicador'
+                }
+              >
                 <p className="indicador__etiqueta">Con produccion sin tarifa</p>
-                <p className="indicador__valor">{datos.resumen.mesesConProduccionSinTarifa}</p>
+                <p className="indicador__valor">{datos.resumen.trimestresConProduccionSinTarifa}</p>
                 <p className="indicador__detalle">Requieren atencion inmediata</p>
               </div>
             </section>
 
             <div className="tabla-envoltura">
               <table>
-                <caption>Calendario anual de tarifas del anio {anio}.</caption>
+                <caption>Calendario trimestral de tarifas del anio {anio}.</caption>
                 <thead>
                   <tr>
-                    <th scope="col">Mes</th>
+                    <th scope="col">Trimestre</th>
+                    <th scope="col">Meses que cubre</th>
                     <th scope="col" className="num">Tarifa Q/kWh</th>
                     <th scope="col">Estado</th>
                     <th scope="col">Origen</th>
@@ -436,17 +921,36 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                 </thead>
                 <tbody>
                   {datos.calendario.map((fila) => (
-                    <tr key={fila.mes} style={fila.requiereAtencion ? { background: 'var(--rojo-100)' } : undefined}>
+                    <tr
+                      key={fila.trimestre}
+                      style={fila.requiereAtencion ? { background: 'var(--rojo-100)' } : undefined}
+                    >
                       <th scope="row" style={{ position: 'static', background: 'transparent' }}>
-                        {fila.mesNombre}
-                        {fila.cerrado ? (
+                        {fila.etiqueta}
+                        {fila.cerradoCompleto ? (
                           <span className="etiqueta etiqueta--gris" style={{ marginLeft: '0.35rem' }}>
                             Cerrado
                           </span>
+                        ) : fila.cerradoParcial ? (
+                          <span className="etiqueta etiqueta--ambar" style={{ marginLeft: '0.35rem' }}>
+                            Cierre parcial
+                          </span>
                         ) : null}
                       </th>
+                      <td>
+                        {fila.meses}
+                        {fila.mesesCerrados.length > 0 ? (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>
+                            Cerrados: {fila.mesesCerrados.map((m) => nombreMes(m)).join(', ')}
+                          </div>
+                        ) : null}
+                      </td>
                       <td className="num">
-                        {fila.tarifa ? numero(fila.tarifa.costo_kwh, 6) : <span style={{ color: 'var(--texto-suave)' }}>—</span>}
+                        {fila.tarifa ? (
+                          numero(fila.tarifa.costo_kwh, 6)
+                        ) : (
+                          <span style={{ color: 'var(--texto-suave)' }}>—</span>
+                        )}
                       </td>
                       <td>
                         {fila.tarifa ? (
@@ -477,13 +981,13 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                       <td>{fila.tarifa ? fechaHora(fila.tarifa.updated_at) : '—'}</td>
                       <td className="no-imprimir">
                         <div className="acciones">
-                          {!fila.tarifa && gestionar && !fila.cerrado ? (
+                          {!fila.tarifa && gestionar && !fila.cerradoCompleto ? (
                             <>
                               <button
                                 type="button"
                                 className="boton boton--pequeno"
                                 onClick={() => {
-                                  setNueva({ mes: fila.mes, costo: '', motivo: '', aprobar: false });
+                                  setNueva({ trimestre: fila.trimestre, costo: '', motivo: '', aprobar: false });
                                   setError(null);
                                 }}
                               >
@@ -494,12 +998,12 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                                 className="boton boton--secundario boton--pequeno"
                                 onClick={() => setCopiar(fila)}
                               >
-                                Copiar mes anterior
+                                Copiar trimestre anterior
                               </button>
                             </>
                           ) : null}
 
-                          {fila.tarifa?.estado === 'BORRADOR' && aprobar && !fila.cerrado ? (
+                          {fila.tarifa?.estado === 'BORRADOR' && aprobar && !fila.cerradoCompleto ? (
                             <button
                               type="button"
                               className="boton boton--verde boton--pequeno"
@@ -516,13 +1020,13 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                             </button>
                           ) : null}
 
-                          {fila.tarifa?.estado === 'BORRADOR' && gestionar && !fila.cerrado ? (
+                          {fila.tarifa?.estado === 'BORRADOR' && gestionar && !fila.cerradoCompleto ? (
                             <button
                               type="button"
                               className="boton boton--secundario boton--pequeno"
                               onClick={() =>
                                 setNueva({
-                                  mes: fila.mes,
+                                  trimestre: fila.trimestre,
                                   costo: String(fila.tarifa!.costo_kwh),
                                   motivo: '',
                                   aprobar: false,
@@ -533,7 +1037,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                             </button>
                           ) : null}
 
-                          {fila.tarifa?.estado === 'APROBADA' && recalcular && !fila.cerrado ? (
+                          {fila.tarifa?.estado === 'APROBADA' && recalcular && !fila.cerradoCompleto ? (
                             <button
                               type="button"
                               className="boton boton--secundario boton--pequeno"
@@ -546,7 +1050,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                             </button>
                           ) : null}
 
-                          {fila.tarifa && aprobar && fila.tarifa.estado !== 'ANULADA' && !fila.cerrado ? (
+                          {fila.tarifa && aprobar && fila.tarifa.estado !== 'ANULADA' && !fila.cerradoCompleto ? (
                             <button
                               type="button"
                               className="boton boton--peligro boton--pequeno"
@@ -556,21 +1060,35 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                             </button>
                           ) : null}
 
-                          {!fila.cerrado && puede('tarifas.cerrar_mes') && fila.registrosProduccion > 0 ? (
+                          {/* El cierre contable sigue siendo MENSUAL: se elige
+                              cual de los tres meses del trimestre se cierra. */}
+                          {puede('tarifas.cerrar_mes') && fila.registrosProduccion > 0 ? (
                             <button
                               type="button"
                               className="boton boton--secundario boton--pequeno"
-                              onClick={() => setCierre({ fila, abrir: false, motivo: '' })}
+                              disabled={fila.cerradoCompleto}
+                              onClick={() =>
+                                setCierre({
+                                  fila,
+                                  mes:
+                                    fila.mesesNumeros.find((m) => !fila.mesesCerrados.includes(m)) ??
+                                    fila.mesesNumeros[0],
+                                  abrir: false,
+                                  motivo: '',
+                                })
+                              }
                             >
                               Cerrar mes
                             </button>
                           ) : null}
 
-                          {fila.cerrado && puede('tarifas.reabrir_mes') ? (
+                          {fila.mesesCerrados.length > 0 && puede('tarifas.reabrir_mes') ? (
                             <button
                               type="button"
                               className="boton boton--secundario boton--pequeno"
-                              onClick={() => setCierre({ fila, abrir: true, motivo: '' })}
+                              onClick={() =>
+                                setCierre({ fila, mes: fila.mesesCerrados[0], abrir: true, motivo: '' })
+                              }
                             >
                               Reabrir mes
                             </button>
@@ -591,15 +1109,19 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
       {/* --------------------------- Registrar / editar --------------------------- */}
       {nueva ? (
         <Modal
-          titulo={`Tarifa de ${nombreMes(nueva.mes)} ${anio}`}
+          titulo={`Tarifa del ${etiquetaTrimestre(nueva.trimestre)} de ${anio}`}
           alCerrar={() => setNueva(null)}
         >
           {error ? <MensajeError error={error} /> : null}
+          <MensajeInfo>
+            Esta tarifa se aplicara a los tres meses del trimestre:{' '}
+            <strong>{mesesDelTrimestre(nueva.trimestre)}</strong>.
+          </MensajeInfo>
           <form
             noValidate
             onSubmit={(evento: FormEvent) => {
               evento.preventDefault();
-              const existente = datos?.calendario.find((c) => c.mes === nueva.mes)?.tarifa;
+              const existente = datos?.calendario.find((c) => c.trimestre === nueva.trimestre)?.tarifa;
               void ejecutar(async () => {
                 const mensaje = existente
                   ? await mutacion.mutateAsync({
@@ -611,7 +1133,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                       ruta: `/projects/${idProyecto}/rates`,
                       cuerpo: {
                         anio,
-                        mes: nueva.mes,
+                        trimestre: nueva.trimestre,
                         costo_kwh: Number(nueva.costo),
                         motivo: nueva.motivo || undefined,
                         aprobarInmediato: nueva.aprobar,
@@ -643,7 +1165,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                 <CampoCasilla
                   etiqueta="Aprobar inmediatamente"
                   ancho
-                  ayuda="Al aprobarla se valorizaran automaticamente los registros de ese mes que estaban pendientes."
+                  ayuda="Al aprobarla se valorizaran los registros pendientes de los tres meses del trimestre."
                   checked={nueva.aprobar}
                   onChange={(e) => setNueva({ ...nueva, aprobar: e.target.checked })}
                 />
@@ -661,23 +1183,24 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
         </Modal>
       ) : null}
 
-      {/* --------------------------- Copiar mes anterior --------------------------- */}
+      {/* --------------------------- Copiar trimestre anterior --------------------------- */}
       {copiar ? (
         <Confirmacion
-          titulo={`Copiar la tarifa del mes anterior a ${copiar.mesNombre} ${anio}`}
+          titulo={`Copiar la tarifa del trimestre anterior al ${copiar.etiqueta} de ${anio}`}
           textoConfirmar="Confirmar copia"
           ocupado={mutacion.isPending}
           descripcion={
             <p>
-              Se creara un <strong>BORRADOR</strong> con la tarifa aprobada del mes inmediato anterior. La
-              copia nunca se aplica de forma silenciosa: debera revisarla y aprobarla para que tenga efecto.
+              Se creara un <strong>BORRADOR</strong> con la tarifa aprobada del trimestre inmediato
+              anterior. La copia nunca se aplica de forma silenciosa: debera revisarla y aprobarla para
+              que tenga efecto sobre los tres meses de {copiar.meses}.
             </p>
           }
           alConfirmar={() =>
             void ejecutar(async () => {
               const mensaje = await mutacion.mutateAsync({
                 ruta: `/projects/${idProyecto}/rates/copy-previous`,
-                cuerpo: { anio, mes: copiar.mes, confirmado: true },
+                cuerpo: { anio, trimestre: copiar.trimestre, confirmado: true },
               });
               setCopiar(null);
               return mensaje;
@@ -690,7 +1213,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
       {/* --------------------------- Correccion con impacto --------------------------- */}
       {correccion ? (
         <Modal
-          titulo={`Corregir la tarifa de ${correccion.fila.mesNombre} ${anio}`}
+          titulo={`Corregir la tarifa del ${correccion.fila.etiqueta} de ${anio}`}
           alCerrar={() => {
             setCorreccion(null);
             setImpacto(null);
@@ -698,8 +1221,9 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
         >
           {error ? <MensajeError error={error} /> : null}
           <MensajeAlerta titulo="Esta tarifa ya fue utilizada">
-            Corregir una tarifa aprobada modifica valores historicos ya calculados. Debe revisar el analisis
-            de impacto, indicar un motivo y confirmar. Todo el cambio queda auditado (antes y despues).
+            Corregir una tarifa aprobada modifica valores historicos ya calculados de los tres meses del
+            trimestre ({correccion.fila.meses}). Debe revisar el analisis de impacto, indicar un motivo y
+            confirmar. Todo el cambio queda auditado (antes y despues).
           </MensajeAlerta>
 
           <div className="formulario">
@@ -755,6 +1279,10 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                   <caption>Impacto de la correccion sobre los registros ya valorizados.</caption>
                   <tbody>
                     <tr>
+                      <th scope="row">Periodo afectado</th>
+                      <td className="num">{impacto.etiqueta}</td>
+                    </tr>
+                    <tr>
                       <th scope="row">Registros afectados</th>
                       <td className="num">{numero(impacto.registrosAfectados, 0)}</td>
                     </tr>
@@ -786,6 +1314,12 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
                 </table>
               </div>
               <MensajeAlerta>{impacto.advertencia}</MensajeAlerta>
+              {impacto.mesesCerrados.length > 0 ? (
+                <MensajeAlerta titulo="Hay meses cerrados en el trimestre">
+                  {impacto.mesesCerrados.map((m) => nombreMes(m)).join(', ')} ya estan cerrados
+                  contablemente. Debe reabrirlos antes de poder corregir la tarifa.
+                </MensajeAlerta>
+              ) : null}
             </>
           ) : null}
 
@@ -834,15 +1368,16 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
       {/* --------------------------- Anular --------------------------- */}
       {anular ? (
         <Confirmacion
-          titulo={`Anular la tarifa de ${anular.fila.mesNombre} ${anio}`}
+          titulo={`Anular la tarifa del ${anular.fila.etiqueta} de ${anio}`}
           peligroso
           textoConfirmar="Anular tarifa"
           ocupado={mutacion.isPending}
           descripcion={
             <p>
-              Los kWh registrados se conservan intactos, pero los registros valorizados con esta tarifa
-              volveran al estado <strong>pendiente de tarifa</strong> y su valor economico dejara de
-              mostrarse hasta que se registre y apruebe una nueva tarifa.
+              Los kWh registrados se conservan intactos, pero los registros de{' '}
+              {anular.fila.meses} valorizados con esta tarifa volveran al estado{' '}
+              <strong>pendiente de tarifa</strong> y su valor economico dejara de mostrarse hasta que se
+              registre y apruebe una nueva tarifa trimestral.
             </p>
           }
           alConfirmar={() =>
@@ -872,8 +1407,8 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
         <Confirmacion
           titulo={
             cierre.abrir
-              ? `Reabrir ${cierre.fila.mesNombre} ${anio}`
-              : `Cerrar ${cierre.fila.mesNombre} ${anio}`
+              ? `Reabrir un mes del ${cierre.fila.etiqueta} de ${anio}`
+              : `Cerrar un mes del ${cierre.fila.etiqueta} de ${anio}`
           }
           peligroso={cierre.abrir}
           textoConfirmar={cierre.abrir ? 'Reabrir periodo' : 'Cerrar periodo'}
@@ -886,8 +1421,9 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
               </p>
             ) : (
               <p>
-                Al cerrar el periodo no se podran modificar tarifas ni produccion de ese mes sin una
-                reapertura autorizada. El sistema exige que no queden registros sin tarifa aprobada.
+                El cierre contable es <strong>mensual</strong> aunque la tarifa sea trimestral. Al cerrar
+                el mes no se podran modificar tarifas ni produccion de ese periodo sin una reapertura
+                autorizada. El sistema exige que no queden registros sin tarifa aprobada.
               </p>
             )
           }
@@ -895,7 +1431,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
             void ejecutar(async () => {
               const mensaje = await mutacion.mutateAsync({
                 ruta: `/projects/${idProyecto}/rates/${cierre.abrir ? 'reopen' : 'close'}`,
-                cuerpo: { anio, mes: cierre.fila.mes, motivo: cierre.motivo || undefined },
+                cuerpo: { anio, mes: cierre.mes, motivo: cierre.motivo || undefined },
               });
               setCierre(null);
               return mensaje;
@@ -903,6 +1439,20 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
           }
           alCancelar={() => setCierre(null)}
         >
+          <div className="formulario">
+            <CampoSelect
+              etiqueta="Mes del trimestre"
+              value={String(cierre.mes)}
+              onChange={(e) => setCierre({ ...cierre, mes: Number(e.target.value) })}
+            >
+              {(cierre.abrir ? cierre.fila.mesesCerrados : cierre.fila.mesesNumeros).map((m) => (
+                <option key={m} value={m} disabled={!cierre.abrir && cierre.fila.mesesCerrados.includes(m)}>
+                  {nombreMes(m)}
+                  {!cierre.abrir && cierre.fila.mesesCerrados.includes(m) ? ' (ya cerrado)' : ''}
+                </option>
+              ))}
+            </CampoSelect>
+          </div>
           <CampoArea
             etiqueta="Motivo"
             obligatorio={cierre.abrir}

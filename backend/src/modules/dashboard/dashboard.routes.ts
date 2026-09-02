@@ -5,10 +5,16 @@ import { asyncHandler, consulta, ok, validarConsulta } from '../../utils/http';
 import { requiereAutenticacion, requierePermiso } from '../../middleware/autenticacion';
 import { PERMISOS } from '../../config/permisos';
 import * as consultas from '../../services/consultasProduccion';
-import { coberturaTarifaria } from '../../services/valorizacion';
-import { factoresAmbientales } from '../../services/configuracion';
+import { alertaTarifaTrimestral, coberturaTarifaria } from '../../services/valorizacion';
+import { factoresAmbientales, obtenerNumero } from '../../services/configuracion';
 import { errores } from '../../utils/errors';
-import { hoyISO, mesesDelPeriodo, periodoAnterior, MESES_ES } from '../../utils/fechas';
+import {
+  etiquetaTrimestre,
+  hoyISO,
+  mesesDelPeriodo,
+  periodoAnterior,
+  trimestresDelPeriodo,
+} from '../../utils/fechas';
 import { porcentajeCumplimiento, redondear } from '../../utils/numeros';
 
 export const dashboardRouter = Router();
@@ -19,6 +25,7 @@ const esquema = z.object({
   hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   id_cliente: z.coerce.number().int().positive().optional(),
   id_proyecto: z.coerce.number().int().positive().optional(),
+  id_grupo: z.coerce.number().int().positive().optional(),
   id_inversor: z.coerce.number().int().positive().optional(),
   granularidad: z.enum(['DIARIA', 'MENSUAL', 'ANUAL']).default('MENSUAL'),
 });
@@ -42,6 +49,7 @@ dashboardRouter.get(
       hasta,
       idCliente: p.id_cliente ?? null,
       idProyecto: p.id_proyecto ?? null,
+      idGrupo: p.id_grupo ?? null,
       idInversor: p.id_inversor ?? null,
     };
     const anterior = periodoAnterior({ desde, hasta });
@@ -72,6 +80,11 @@ dashboardRouter.get(
       consultas.periodosConMezclaDeNiveles(filtros),
       factoresAmbientales(),
     ]);
+
+    // Agrupacion por grupo de inversores y alerta de la tarifa trimestral.
+    const grupos = await consultas.porGrupo(filtros);
+    const diasDeAviso = await obtenerNumero('tarifa.dias_aviso_trimestre', 15);
+    const alertaTarifa = await alertaTarifaTrimestral(diasDeAviso, filtros.idProyecto);
 
     // --- Produccion del dia, mes y anio en curso -------------------------
     const [dia, mes, anio] = await Promise.all([
@@ -110,18 +123,27 @@ dashboardRouter.get(
     );
     const proyeccionKwh = Number(proyeccion?.total ?? 0);
 
-    // --- Tarifas aplicadas mes a mes en el periodo ----------------------
-    const tarifasPeriodo = meses.length
-      ? await query<{ anio: number; mes: number; proyecto: string; costo_kwh: number; estado: string }>(
-          `SELECT t.anio, t.mes, pr.nombre AS proyecto, t.costo_kwh, t.estado
+    // --- Tarifas aplicadas en el periodo, por TRIMESTRE ------------------
+    // El costo del kWh se pacta por trimestre calendario, de modo que un
+    // periodo de consulta puede abarcar varias tarifas distintas.
+    const trimestres = trimestresDelPeriodo({ desde, hasta });
+    const tarifasPeriodo = trimestres.length
+      ? await query<{
+          anio: number;
+          trimestre: number;
+          proyecto: string;
+          costo_kwh: number;
+          estado: string;
+        }>(
+          `SELECT t.anio, t.trimestre, pr.nombre AS proyecto, t.costo_kwh, t.estado
              FROM tarifas_kwh t JOIN proyectos pr ON pr.id_proyecto = t.id_proyecto
             WHERE t.estado = 'APROBADA'
-              AND (${meses.map(() => '(t.anio = ? AND t.mes = ?)').join(' OR ')})
+              AND (${trimestres.map(() => '(t.anio = ? AND t.trimestre = ?)').join(' OR ')})
               ${filtros.idProyecto ? 'AND t.id_proyecto = ?' : ''}
               ${filtros.idCliente ? 'AND pr.id_cliente = ?' : ''}
-            ORDER BY t.anio, t.mes, pr.nombre`,
+            ORDER BY t.anio, t.trimestre, pr.nombre`,
           [
-            ...meses.flatMap((m) => [m.anio, m.mes]),
+            ...trimestres.flatMap((t) => [t.anio, t.trimestre]),
             ...(filtros.idProyecto ? [filtros.idProyecto] : []),
             ...(filtros.idCliente ? [filtros.idCliente] : []),
           ],
@@ -192,16 +214,19 @@ dashboardRouter.get(
         etiqueta: proyeccionKwh > 0 ? null : 'Sin proyeccion aprobada para el periodo',
       },
       tarifas: {
-        aplicadasPorMes: tarifasPeriodo.map((t) => ({
+        aplicadasPorTrimestre: tarifasPeriodo.map((t) => ({
           ...t,
-          etiqueta: `${MESES_ES[t.mes - 1]} ${t.anio}`,
+          etiqueta: etiquetaTrimestre(t.anio, t.trimestre),
         })),
         cobertura,
+        periodicidad: 'TRIMESTRAL',
+        alertaTrimestral: alertaTarifa,
         advertencia:
-          cobertura.mesesPendientes.length > 0
-            ? `Hay ${cobertura.mesesPendientes.length} mes(es) sin tarifa aprobada. El valor en quetzales es parcial.`
+          cobertura.trimestresPendientes.length > 0
+            ? `Hay ${cobertura.trimestresPendientes.length} trimestre(s) sin tarifa aprobada. El valor en quetzales es parcial.`
             : null,
       },
+      grupos,
       catalogos: {
         clientes: Number(conteos?.clientes ?? 0),
         proyectos: Number(conteos?.proyectos ?? 0),

@@ -118,13 +118,14 @@ async function construirReporte(parametros: ParametrosReporte, usuario: string) 
   const notas: string[] = [
     `Periodo consultado: ${formatoLargoEs(parametros.desde)} al ${formatoLargoEs(parametros.hasta)} (zona horaria America/Guatemala).`,
     `Ultima actualizacion de datos en el periodo: ${resumen.ultimaFecha ? formatoLargoEs(resumen.ultimaFecha) : 'sin registros'}.`,
-    'El valor economico se calcula registro por registro con la tarifa aprobada del mes correspondiente y luego se suma.',
+    'La tarifa del kWh tiene vigencia TRIMESTRAL. El valor economico se calcula registro por registro con la tarifa aprobada del trimestre correspondiente y luego se suma.',
     'Para evitar doble conteo, cuando un proyecto tiene detalle por inversor en un mes, el consolidado de ese mes no se suma.',
   ];
 
   if (!cobertura.completa) {
     notas.push(
-      `ADVERTENCIA: existen ${cobertura.mesesPendientes.length} mes(es) sin tarifa aprobada y ${cobertura.registrosPendientes} registro(s) sin valorizar. El monto en quetzales es PARCIAL.`,
+      `ADVERTENCIA: existen ${cobertura.trimestresPendientes.length} trimestre(s) sin tarifa aprobada ` +
+        `y ${cobertura.registrosPendientes} registro(s) sin valorizar. El monto en quetzales es PARCIAL.`,
     );
   }
 
@@ -276,7 +277,7 @@ function indicadoresDelReporte(reporte: Reporte) {
     {
       etiqueta: 'Cobertura tarifaria',
       valor: reporte.cobertura.completa ? 'Completa' : 'Parcial',
-      detalle: `${reporte.cobertura.mesesConTarifa.length} mes(es) con tarifa / ${reporte.cobertura.mesesPendientes.length} pendiente(s)`,
+      detalle: `${reporte.cobertura.trimestresConTarifa.length} trimestre(s) con tarifa / ${reporte.cobertura.trimestresPendientes.length} pendiente(s)`,
     },
   ];
 }
@@ -336,7 +337,7 @@ reportesRouter.post(
             kwh: reporte.resumen.kwh,
             valor_q: reporte.resumen.valor_q,
             registros: reporte.resumen.registros,
-            mesesPendientes: reporte.cobertura.mesesPendientes.length,
+            mesesPendientes: reporte.cobertura.trimestresPendientes.length,
           }),
           reporte.cobertura.completa ? 'COMPLETA' : 'PARCIAL',
         ],
@@ -356,7 +357,7 @@ reportesRouter.post(
       ...reporte,
       advertenciaOficial: reporte.cobertura.completa
         ? null
-        : `Este reporte NO puede considerarse un documento oficial completo: hay ${reporte.cobertura.mesesPendientes.length} mes(es) sin tarifa aprobada, por lo que el monto en quetzales es parcial.`,
+        : `Este reporte NO puede considerarse un documento oficial completo: hay ${reporte.cobertura.trimestresPendientes.length} mes(es) sin tarifa aprobada, por lo que el monto en quetzales es parcial.`,
     });
   }),
 );

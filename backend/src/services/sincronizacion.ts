@@ -36,6 +36,7 @@ export interface ResultadoSincronizacion {
 interface InversorSincronizable {
   id_inversor: number;
   id_proyecto: number;
+  id_grupo: number;
   serial_externo: string;
   estacion_externa: string | null;
 }
@@ -95,7 +96,7 @@ export async function ejecutarSincronizacion(
   }
 
   const inversores = await query<InversorSincronizable>(
-    `SELECT i.id_inversor, i.id_proyecto, i.serial_externo, i.estacion_externa
+    `SELECT i.id_inversor, i.id_proyecto, i.id_grupo, i.serial_externo, i.estacion_externa
        FROM inversores i WHERE ${condiciones.join(' AND ')}`,
     params,
   );
@@ -236,13 +237,14 @@ export async function ejecutarSincronizacion(
             } else {
               await execute(
                 `INSERT INTO produccion
-                   (id_proyecto, id_inversor, nivel_detalle, fecha, anio, mes, granularidad,
-                    kwh, origen, secuencia, id_sync, id_tarifa, costo_kwh_aplicado, valor_q,
-                    estado_valorizacion)
-                 VALUES (?, ?, 'POR_INVERSOR', ?, ?, ?, ?, ?, 'HUAWEI_API', 0, ?, ?, ?, ?, ?)`,
+                   (id_proyecto, id_inversor, id_grupo, nivel_detalle, fecha, anio, mes,
+                    granularidad, kwh, origen, secuencia, id_sync, id_tarifa,
+                    costo_kwh_aplicado, valor_q, estado_valorizacion)
+                 VALUES (?, ?, ?, 'POR_INVERSOR', ?, ?, ?, ?, ?, 'HUAWEI_API', 0, ?, ?, ?, ?, ?)`,
                 [
                   inversor.id_proyecto,
                   inversor.id_inversor,
+                  inversor.id_grupo,
                   fecha,
                   anio,
                   mes,

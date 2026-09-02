@@ -176,3 +176,79 @@ export function ahoraLocal(): string {
     timeStyle: 'medium',
   }).format(new Date());
 }
+
+// ---------------------------------------------------------------------------
+// Trimestres
+//
+// La tarifa del kWh tiene vigencia TRIMESTRAL sobre trimestres calendario.
+// La produccion y la proyeccion siguen siendo mensuales: solo la tarifa
+// cambia de periodicidad.
+// ---------------------------------------------------------------------------
+
+export const TRIMESTRES = [
+  { numero: 1, etiqueta: 'I trimestre', meses: 'Enero a Marzo' },
+  { numero: 2, etiqueta: 'II trimestre', meses: 'Abril a Junio' },
+  { numero: 3, etiqueta: 'III trimestre', meses: 'Julio a Septiembre' },
+  { numero: 4, etiqueta: 'IV trimestre', meses: 'Octubre a Diciembre' },
+];
+
+/** Trimestre calendario (1..4) al que pertenece un mes. */
+export function trimestreDeMes(mes: number): number {
+  return Math.ceil(mes / 3);
+}
+
+/** Los tres meses que componen un trimestre. */
+export function mesesDelTrimestre(trimestre: number): number[] {
+  const primero = (trimestre - 1) * 3 + 1;
+  return [primero, primero + 1, primero + 2];
+}
+
+export function etiquetaTrimestre(anio: number, trimestre: number): string {
+  const definicion = TRIMESTRES[trimestre - 1];
+  return definicion ? `${definicion.etiqueta} ${anio}` : `T${trimestre} ${anio}`;
+}
+
+export function nombreMesesTrimestre(trimestre: number): string {
+  return TRIMESTRES[trimestre - 1]?.meses ?? '';
+}
+
+export function primerDiaTrimestre(anio: number, trimestre: number): string {
+  return primerDiaMes(anio, (trimestre - 1) * 3 + 1);
+}
+
+export function ultimoDiaTrimestre(anio: number, trimestre: number): string {
+  return ultimoDiaMes(anio, trimestre * 3);
+}
+
+/** Trimestre en curso segun la fecha civil de Guatemala. */
+export function trimestreActual(): { anio: number; trimestre: number } {
+  const hoy = hoyISO();
+  return { anio: Number(hoy.slice(0, 4)), trimestre: trimestreDeMes(Number(hoy.slice(5, 7))) };
+}
+
+export function trimestreSiguiente(anio: number, trimestre: number): { anio: number; trimestre: number } {
+  return trimestre === 4 ? { anio: anio + 1, trimestre: 1 } : { anio, trimestre: trimestre + 1 };
+}
+
+/** Dias que faltan para que termine el trimestre indicado (0 si ya termino). */
+export function diasRestantesDelTrimestre(anio: number, trimestre: number): number {
+  const fin = new Date(`${ultimoDiaTrimestre(anio, trimestre)}T00:00:00Z`);
+  const hoy = new Date(`${hoyISO()}T00:00:00Z`);
+  return Math.max(0, Math.round((fin.getTime() - hoy.getTime()) / 86400000));
+}
+
+/** Trimestres distintos cubiertos por un rango de fechas. */
+export function trimestresDelPeriodo(periodo: Periodo): Array<{ anio: number; trimestre: number }> {
+  const vistos = new Set<string>();
+  const salida: Array<{ anio: number; trimestre: number }> = [];
+
+  for (const mes of mesesDelPeriodo(periodo)) {
+    const trimestre = trimestreDeMes(mes.mes);
+    const clave = `${mes.anio}-${trimestre}`;
+    if (!vistos.has(clave)) {
+      vistos.add(clave);
+      salida.push({ anio: mes.anio, trimestre });
+    }
+  }
+  return salida;
+}

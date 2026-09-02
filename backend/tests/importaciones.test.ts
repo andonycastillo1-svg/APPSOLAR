@@ -193,14 +193,11 @@ describe('Importacion de historicos (ETL)', () => {
   // Flujo completo de previsualizacion y confirmacion
   // -------------------------------------------------------------------------
 
-  it('carga el formato historico del Excel y valoriza con la tarifa de cada mes', async () => {
+  it('carga el formato historico del Excel y valoriza con la tarifa del trimestre', async () => {
+    // I trimestre con tarifa; II trimestre deliberadamente sin ella.
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, mes: 1, costo_kwh: 1.0, aprobarInmediato: true })
-      .expect(201);
-    await comoUsuario(admin)
-      .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, mes: 2, costo_kwh: 2.0, aprobarInmediato: true })
+      .send({ anio: 2025, trimestre: 1, costo_kwh: 1.0, aprobarInmediato: true })
       .expect(201);
 
     const previa = await comoUsuario(operativo)
@@ -211,7 +208,7 @@ describe('Importacion de historicos (ETL)', () => {
           CABECERA_HISTORICA,
           `${planta},PPA,2025,Enero,1000,Operacion normal`,
           `${planta},PPA,2025,Febrero,500,`,
-          `${planta},PPA,2025,Marzo,300,Sin tarifa aun`,
+          `${planta},PPA,2025,Abril,300,Trimestre sin tarifa aun`,
         ),
         'historico.csv',
       )
@@ -222,7 +219,7 @@ describe('Importacion de historicos (ETL)', () => {
     expect(previa.body.datos.totales.validas).toBe(3);
     expect(previa.body.datos.puedeConfirmar).toBe(true);
     expect(previa.body.datos.mesesSinTarifaAprobada).toHaveLength(1);
-    expect(previa.body.datos.mesesSinTarifaAprobada[0].mesNombre).toBe('Marzo');
+    expect(previa.body.datos.mesesSinTarifaAprobada[0].mesNombre).toBe('Abril');
 
     const confirmacion = await comoUsuario(operativo)
       .post(`/api/imports/${previa.body.datos.id_historico}/confirm`)
@@ -235,8 +232,10 @@ describe('Importacion de historicos (ETL)', () => {
 
     const filas = await filasProduccion(datos.idProyecto);
     expect(filas).toHaveLength(3);
+    // Enero y febrero comparten la tarifa del I trimestre (Q 1.00).
     expect(Number(filas[0].valor_q)).toBe(1000);
-    expect(Number(filas[1].valor_q)).toBe(1000);
+    expect(Number(filas[1].valor_q)).toBe(500);
+    // Abril pertenece al II trimestre, que aun no tiene tarifa aprobada.
     expect(filas[2].estado_valorizacion).toBe('PENDIENTE_DE_TARIFA');
     expect(Number(filas[2].kwh)).toBe(300);
 
@@ -537,6 +536,7 @@ describe('Importacion de historicos (ETL)', () => {
     // Se elimina el proyecto entre la previsualizacion y la confirmacion:
     // la insercion violara la clave foranea a mitad del lote.
     await execute('DELETE FROM inversores WHERE id_proyecto = ?', [datos.idProyecto]);
+    await execute('DELETE FROM grupos WHERE id_proyecto = ?', [datos.idProyecto]);
     await execute('DELETE FROM tarifas_kwh WHERE id_proyecto = ?', [datos.idProyecto]);
     await execute('DELETE FROM proyectos WHERE id_proyecto = ?', [datos.idProyecto]);
 
@@ -597,7 +597,7 @@ describe('Importacion de historicos (ETL)', () => {
   it('impide cargar datos en un periodo cerrado', async () => {
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, mes: 1, costo_kwh: 1.0, aprobarInmediato: true })
+      .send({ anio: 2025, trimestre: 1, costo_kwh: 1.0, aprobarInmediato: true })
       .expect(201);
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates/close`)

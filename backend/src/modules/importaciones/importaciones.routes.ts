@@ -109,6 +109,7 @@ interface LotePreparado {
   filas: FilaCanonica[];
   problemas: ProblemaFila[];
   idProyectoFijo: number | null;
+  idGrupoFijo: number | null;
   idInversorFijo: number | null;
   resolucionPlantas: Record<string, number | null>;
   resolucionSeriales: Record<string, number | null>;
@@ -128,6 +129,9 @@ importacionesRouter.post(
     }
 
     const idProyecto = req.body.id_proyecto ? Number(req.body.id_proyecto) : null;
+    // El grupo permite cargar un archivo del grupo completo cuando el
+    // fabricante no entrego los datos de ese rango por fallas de conexion.
+    const idGrupoSolicitado = req.body.id_grupo ? Number(req.body.id_grupo) : null;
     const idInversor = req.body.id_inversor ? Number(req.body.id_inversor) : null;
     const anioForzado = req.body.anio ? Number(req.body.anio) : undefined;
 
@@ -136,14 +140,33 @@ importacionesRouter.post(
 
     let serialUnico: string | null = null;
     let proyectoDelInversor: number | null = null;
+    let idGrupoFijo: number | null = idGrupoSolicitado;
+
     if (idInversor) {
-      const inversor = await queryOne<{ id_proyecto: number; serial_externo: string | null }>(
-        'SELECT id_proyecto, serial_externo FROM inversores WHERE id_inversor = ? AND activo = 1',
+      const inversor = await queryOne<{
+        id_proyecto: number;
+        id_grupo: number;
+        serial_externo: string | null;
+      }>(
+        'SELECT id_proyecto, id_grupo, serial_externo FROM inversores WHERE id_inversor = ? AND activo = 1',
         [idInversor],
       );
       if (!inversor) throw errores.validacion('El inversor seleccionado no existe o esta inactivo.');
       serialUnico = inversor.serial_externo;
       proyectoDelInversor = inversor.id_proyecto;
+      // El grupo se hereda del inversor para mantener la jerarquia coherente.
+      idGrupoFijo = inversor.id_grupo;
+    } else if (idGrupoSolicitado) {
+      const grupo = await queryOne<{ id_proyecto: number; activo: number }>(
+        'SELECT id_proyecto, activo FROM grupos WHERE id_grupo = ?',
+        [idGrupoSolicitado],
+      );
+      if (!grupo) throw errores.validacion('El grupo seleccionado no existe.');
+      if (!grupo.activo) throw errores.reglaNegocio('El grupo seleccionado esta desactivado.');
+      if (idProyecto && grupo.id_proyecto !== idProyecto) {
+        throw errores.validacion('El grupo seleccionado no pertenece al proyecto indicado.');
+      }
+      proyectoDelInversor = grupo.id_proyecto;
     }
 
     const lectura = await leerArchivo(archivo.contenido, archivo.extension, {
@@ -233,7 +256,12 @@ importacionesRouter.post(
           : (idProyecto ?? proyectoDelInversor);
       if (!idProyectoGrupo) continue;
 
-      const nivelEntrante = grupo.tieneSerial || idInversor ? 'POR_INVERSOR' : 'PROYECTO_CONSOLIDADO';
+      const nivelEntrante =
+        grupo.tieneSerial || idInversor
+          ? 'POR_INVERSOR'
+          : idGrupoFijo
+            ? 'GRUPO_CONSOLIDADO'
+            : 'PROYECTO_CONSOLIDADO';
       const existente = await queryOne<{ nivel_detalle: string }>(
         `SELECT DISTINCT nivel_detalle FROM produccion
           WHERE id_proyecto = ? AND anio = ? AND mes = ? AND activo = 1 AND nivel_detalle <> ?`,
@@ -304,7 +332,11 @@ importacionesRouter.post(
     }
 
     const nivelDetalleLote =
-      seriales.length > 0 || idInversor ? 'POR_INVERSOR' : 'PROYECTO_CONSOLIDADO';
+      seriales.length > 0 || idInversor
+        ? 'POR_INVERSOR'
+        : idGrupoFijo
+          ? 'GRUPO_CONSOLIDADO'
+          : 'PROYECTO_CONSOLIDADO';
 
     const errores_ = problemas.filter((p) => p.severidad === 'ERROR');
     const advertencias = problemas.filter((p) => p.severidad === 'ADVERTENCIA');
@@ -312,12 +344,13 @@ importacionesRouter.post(
     // --- Registro del lote en `historicos` ------------------------------
     const resultado = await execute(
       `INSERT INTO historicos
-         (id_proyecto, id_inversor, formato, nivel_detalle, nombre_archivo_original,
+         (id_proyecto, id_grupo, id_inversor, formato, nivel_detalle, nombre_archivo_original,
           nombre_archivo_seguro, hash_sha256, tamano_bytes, mime_detectado, id_usuario,
           estado, total_filas, rechazadas, advertencias, duplicadas, fecha_min, fecha_max, resumen)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'VALIDADO', ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'VALIDADO', ?, ?, ?, ?, ?, ?, ?)`,
       [
         idProyecto ?? proyectoDelInversor,
+        idGrupoFijo,
         idInversor,
         lectura.formato,
         nivelDetalleLote,
@@ -364,6 +397,7 @@ importacionesRouter.post(
       filas: lectura.filas,
       problemas,
       idProyectoFijo: idProyecto ?? proyectoDelInversor,
+      idGrupoFijo,
       idInversorFijo: idInversor,
       resolucionPlantas,
       resolucionSeriales,
@@ -386,6 +420,7 @@ importacionesRouter.post(
     ok(res, {
       id_historico: idHistorico,
       formato: lectura.formato,
+      id_grupo: idGrupoFijo,
       nivelDetalleLote,
       encabezados: lectura.encabezados,
       mapeoDetectado: lectura.mapeoDetectado,
@@ -545,7 +580,9 @@ importacionesRouter.post(
         const nivelEntrante =
           decision === 'MAPEAR' || grupo.tieneSerial || lote.idInversorFijo
             ? 'POR_INVERSOR'
-            : 'PROYECTO_CONSOLIDADO';
+            : lote.idGrupoFijo
+              ? 'GRUPO_CONSOLIDADO'
+              : 'PROYECTO_CONSOLIDADO';
 
         const conflicto = await queryOne<{ nivel_detalle: string }>(
           `SELECT DISTINCT nivel_detalle FROM produccion
@@ -650,8 +687,29 @@ importacionesRouter.post(
             });
           }
 
+          // Cada registro necesita conocer su grupo: el del inversor cuando
+          // se mapea a un equipo, o el grupo destino del lote en su defecto.
+          const grupoDeInversor = new Map<number, number>();
           for (const registro of registros) {
-            const nivel = registro.idInversor ? 'POR_INVERSOR' : 'PROYECTO_CONSOLIDADO';
+            if (registro.idInversor && !grupoDeInversor.has(registro.idInversor)) {
+              const inv = await queryOne<{ id_grupo: number }>(
+                'SELECT id_grupo FROM inversores WHERE id_inversor = ?',
+                [registro.idInversor],
+                conn,
+              );
+              if (inv) grupoDeInversor.set(registro.idInversor, inv.id_grupo);
+            }
+          }
+
+          for (const registro of registros) {
+            const idGrupoRegistro = registro.idInversor
+              ? (grupoDeInversor.get(registro.idInversor) ?? null)
+              : lote.idGrupoFijo;
+            const nivel = registro.idInversor
+              ? 'POR_INVERSOR'
+              : idGrupoRegistro
+                ? 'GRUPO_CONSOLIDADO'
+                : 'PROYECTO_CONSOLIDADO';
             const fecha = `${grupo.anio}-${String(grupo.mes).padStart(2, '0')}-01`;
             const granularidad = grupo.filas[0].granularidad;
             const fechaReal = granularidad === 'DIARIA' ? grupo.filas[0].fecha : fecha;
@@ -673,9 +731,17 @@ importacionesRouter.post(
 
             const existente = await queryOne<{ id_produccion: number }>(
               `SELECT id_produccion FROM produccion
-                WHERE id_proyecto = ? AND COALESCE(id_inversor, 0) = ? AND fecha = ?
+                WHERE id_proyecto = ? AND COALESCE(id_grupo, 0) = ?
+                  AND COALESCE(id_inversor, 0) = ? AND fecha = ?
                   AND granularidad = ? AND origen = 'MANUAL' AND secuencia = ?`,
-              [idProyecto, registro.idInversor ?? 0, fechaFinal, granularidad, registro.secuencia],
+              [
+                idProyecto,
+                idGrupoRegistro ?? 0,
+                registro.idInversor ?? 0,
+                fechaFinal,
+                granularidad,
+                registro.secuencia,
+              ],
               conn,
             );
 
@@ -706,13 +772,14 @@ importacionesRouter.post(
             } else {
               await execute(
                 `INSERT INTO produccion
-                   (id_proyecto, id_inversor, nivel_detalle, fecha, anio, mes, granularidad,
+                   (id_proyecto, id_inversor, id_grupo, nivel_detalle, fecha, anio, mes, granularidad,
                     kwh, origen, secuencia, id_historico, id_tarifa, costo_kwh_aplicado,
                     valor_q, estado_valorizacion, comentarios, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                   idProyecto,
                   registro.idInversor,
+                  idGrupoRegistro,
                   nivel,
                   fechaFinal,
                   grupo.anio,
