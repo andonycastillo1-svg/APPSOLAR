@@ -66,3 +66,42 @@ export function useCatalogos() {
     cargando: clientes.isLoading || proyectos.isLoading || inversores.isLoading,
   };
 }
+
+/** Grupo de inversores tal como lo devuelve el catalogo del proyecto. */
+export interface GrupoResumen {
+  id_grupo: number;
+  nombre: string;
+  cantidad_inversores_declarada: number | null;
+  inversores_registrados: number;
+  inversoresFaltantes: number;
+  avisoInversores: string | null;
+  tiene_banco_baterias: number;
+  capacidad_baterias_kwh: number | null;
+  capacidad_kwp: number | null;
+  activo: number;
+}
+
+/**
+ * Grupos de un proyecto (jerarquia PROYECTO -> GRUPO -> INVERSOR).
+ *
+ * Se consulta solo cuando hay un proyecto seleccionado, porque los grupos
+ * pertenecen siempre a un proyecto concreto.
+ */
+export function useGrupos(idProyecto: number | string | null | undefined) {
+  const { puede } = useSesion();
+  const id = Number(idProyecto);
+  const habilitado = puede('proyectos.ver') && Number.isInteger(id) && id > 0;
+
+  const consulta = useQuery({
+    queryKey: ['catalogo', 'grupos', id],
+    enabled: habilitado,
+    staleTime: 60_000,
+    queryFn: async () => (await api.obtener<GrupoResumen[]>(`/projects/${id}/groups`)).datos,
+  });
+
+  return {
+    grupos: consulta.data ?? [],
+    cargando: consulta.isLoading,
+    habilitado,
+  };
+}

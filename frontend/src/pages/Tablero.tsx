@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import { useCatalogos } from '../hooks/useCatalogos';
+import { useCatalogos, useGrupos } from '../hooks/useCatalogos';
 import { CampoSelect, CampoTexto } from '../components/Campos';
 import { Cargando, MensajeAlerta, MensajeError, MensajeInfo } from '../components/Estados';
 import { GraficaDistribucion, GraficaSerie, GraficaBarrasComparacion } from '../components/Graficas';
@@ -20,6 +20,15 @@ import {
   tarifa as formatoTarifa,
   textoEstado,
 } from '../lib/formato';
+
+/** Tarifa trimestral aplicada dentro del periodo consultado. */
+interface TarifaAplicada {
+  anio: number;
+  trimestre: number;
+  proyecto: string;
+  costo_kwh: number;
+  etiqueta: string;
+}
 
 interface RespuestaTablero {
   periodo: { desde: string; hasta: string; comparadoCon: { desde: string; hasta: string } };
@@ -47,16 +56,42 @@ interface RespuestaTablero {
     etiqueta: string | null;
   };
   tarifas: {
-    aplicadasPorMes: Array<{ anio: number; mes: number; proyecto: string; costo_kwh: number; etiqueta: string }>;
+    /** La tarifa del kWh tiene vigencia TRIMESTRAL. */
+    periodicidad: 'TRIMESTRAL';
+    aplicadasPorTrimestre: TarifaAplicada[];
     cobertura: {
-      mesesConTarifa: Array<{ anio: number; mes: number; costo_kwh: number }>;
-      mesesPendientes: Array<{ anio: number; mes: number }>;
+      trimestresConTarifa: Array<{ anio: number; trimestre: number; etiqueta: string; costo_kwh: number }>;
+      trimestresPendientes: Array<{ anio: number; trimestre: number; etiqueta: string }>;
       registrosPendientes: number;
       kwhPendientes: number;
       completa: boolean;
     };
+    /** Aviso de que toca actualizar la tarifa de este trimestre. */
+    alertaTrimestral: {
+      trimestreActual: { anio: number; trimestre: number; etiqueta: string };
+      trimestreSiguiente: { anio: number; trimestre: number; etiqueta: string };
+      diasRestantes: number;
+      diasDeAviso: number;
+      proyectosSinTarifaActual: Array<{ id_proyecto: number; proyecto: string }>;
+      proyectosSinTarifaSiguiente: Array<{ id_proyecto: number; proyecto: string }>;
+      requiereAtencion: boolean;
+      mensaje: string | null;
+    };
     advertencia: string | null;
   };
+  /** Desglose por grupo de inversores (PROYECTO -> GRUPO -> INVERSOR). */
+  grupos: Array<{
+    id_grupo: number;
+    grupo: string;
+    proyecto: string;
+    tiene_banco_baterias: number;
+    capacidad_kwp: number | null;
+    cantidad_inversores_declarada: number | null;
+    inversores_registrados: number;
+    kwh: number;
+    valor_q: number;
+    ultima_fecha: string | null;
+  }>;
   catalogos: { clientes: number; proyectos: number; inversores: number };
   serie: Array<{ periodo: string; etiqueta: string; kwh: number; valor_q: number; pendientes: number }>;
   distribucionPorProyecto: Array<{
@@ -139,6 +174,7 @@ export function PaginaTablero() {
     hasta: hoyISO(),
     id_cliente: '',
     id_proyecto: '',
+    id_grupo: '',
     id_inversor: '',
     granularidad: 'MENSUAL',
   });
@@ -159,6 +195,8 @@ export function PaginaTablero() {
     [catalogos.inversores, filtros.id_proyecto],
   );
 
+  const gruposDelFiltro = useGrupos(filtros.id_proyecto);
+
   const consulta = useQuery({
     queryKey: ['tablero', filtros],
     queryFn: async () => (await api.obtener<RespuestaTablero>('/dashboard', filtros)).datos,
@@ -171,7 +209,11 @@ export function PaginaTablero() {
         siguiente.id_proyecto = '';
         siguiente.id_inversor = '';
       }
-      if (campo === 'id_proyecto') siguiente.id_inversor = '';
+      if (campo === 'id_proyecto') {
+        siguiente.id_grupo = '';
+        siguiente.id_inversor = '';
+      }
+      if (campo === 'id_grupo') siguiente.id_inversor = '';
       return siguiente;
     });
   };
@@ -222,6 +264,18 @@ export function PaginaTablero() {
               <option key={p.id_proyecto} value={p.id_proyecto}>{p.nombre}</option>
             ))}
           </CampoSelect>
+          <CampoSelect
+            etiqueta="Grupo"
+            value={filtros.id_grupo}
+            disabled={!gruposDelFiltro.habilitado}
+            ayuda={gruposDelFiltro.habilitado ? undefined : 'Seleccione primero un proyecto.'}
+            onChange={(e) => cambiar('id_grupo', e.target.value)}
+          >
+            <option value="">Todos</option>
+            {gruposDelFiltro.grupos.map((g) => (
+              <option key={g.id_grupo} value={g.id_grupo}>{g.nombre}</option>
+            ))}
+          </CampoSelect>
           <CampoSelect etiqueta="Inversor" value={filtros.id_inversor} onChange={(e) => cambiar('id_inversor', e.target.value)}>
             <option value="">Todos los inversores</option>
             {inversoresFiltrados.map((i) => (
@@ -247,13 +301,34 @@ export function PaginaTablero() {
 
       {datos ? (
         <>
+          {/* La tarifa se actualiza cada trimestre: el tablero lo recuerda. */}
+          {datos.tarifas.alertaTrimestral.requiereAtencion &&
+          datos.tarifas.alertaTrimestral.mensaje ? (
+            <MensajeAlerta titulo="Actualizacion trimestral de la tarifa pendiente">
+              {datos.tarifas.alertaTrimestral.mensaje}
+              <p style={{ marginTop: '0.4rem', fontSize: '0.8rem' }}>
+                Trimestre en curso:{' '}
+                <strong>{datos.tarifas.alertaTrimestral.trimestreActual.etiqueta}</strong> · quedan{' '}
+                {datos.tarifas.alertaTrimestral.diasRestantes} dia(s) · el siguiente es{' '}
+                {datos.tarifas.alertaTrimestral.trimestreSiguiente.etiqueta}.
+              </p>
+              {datos.tarifas.alertaTrimestral.proyectosSinTarifaActual.length > 0 ? (
+                <ul style={{ margin: '0.4rem 0 0 1rem', fontSize: '0.82rem' }}>
+                  {datos.tarifas.alertaTrimestral.proyectosSinTarifaActual.map((p) => (
+                    <li key={p.id_proyecto}>
+                      <Link to={`/proyectos/${p.id_proyecto}`}>{p.proyecto}</Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </MensajeAlerta>
+          ) : null}
+
           {datos.tarifas.advertencia ? (
             <MensajeAlerta titulo="Valorizacion parcial">
-              {datos.tarifas.advertencia} Meses pendientes:{' '}
-              {datos.tarifas.cobertura.mesesPendientes
-                .map((m) => `${String(m.mes).padStart(2, '0')}/${m.anio}`)
-                .join(', ')}
-              . La energia registrada ({kwh(datos.tarifas.cobertura.kwhPendientes)}) se conserva intacta.
+              {datos.tarifas.advertencia} Trimestres pendientes:{' '}
+              {datos.tarifas.cobertura.trimestresPendientes.map((t) => t.etiqueta).join(', ')}. La
+              energia registrada ({kwh(datos.tarifas.cobertura.kwhPendientes)}) se conserva intacta.
             </MensajeAlerta>
           ) : null}
 
@@ -422,19 +497,58 @@ export function PaginaTablero() {
             ) : null}
           </section>
 
+          {/* Desglose por grupo de inversores: el nivel intermedio entre el
+              proyecto y el equipo. */}
+          {datos.grupos.length > 0 ? (
+            <section className="tarjeta">
+              <h2>Generacion por grupo de inversores</h2>
+              <Tabla<RespuestaTablero['grupos'][number]>
+                descripcion="Cada proyecto se divide en grupos y cada grupo agrupa varios inversores."
+                columnas={[
+                  { clave: 'grupo', titulo: 'Grupo', render: (g) => g.grupo },
+                  { clave: 'proyecto', titulo: 'Proyecto', render: (g) => g.proyecto },
+                  {
+                    clave: 'inversores',
+                    titulo: 'Inversores',
+                    numerica: true,
+                    render: (g) =>
+                      g.cantidad_inversores_declarada !== null
+                        ? `${g.inversores_registrados} de ${g.cantidad_inversores_declarada}`
+                        : String(g.inversores_registrados),
+                  },
+                  {
+                    clave: 'baterias',
+                    titulo: 'Baterias',
+                    render: (g) =>
+                      g.tiene_banco_baterias ? (
+                        <span className="etiqueta etiqueta--verde">Si</span>
+                      ) : (
+                        <span className="etiqueta etiqueta--gris">No</span>
+                      ),
+                  },
+                  { clave: 'kwh', titulo: 'Generacion', numerica: true, render: (g) => kwh(g.kwh) },
+                  { clave: 'valor', titulo: 'Valor', numerica: true, render: (g) => quetzales(g.valor_q) },
+                ]}
+                filas={datos.grupos}
+                claveFila={(g) => g.id_grupo}
+                vacioTitulo="Sin generacion por grupo en el periodo"
+              />
+            </section>
+          ) : null}
+
           <div style={{ display: 'grid', gap: '1.1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))' }}>
             <section className="tarjeta">
-              <h2>Tarifas aplicadas en el periodo</h2>
-              <Tabla
+              <h2>Tarifas aplicadas en el periodo (vigencia trimestral)</h2>
+              <Tabla<TarifaAplicada>
                 columnas={[
-                  { clave: 'mes', titulo: 'Periodo', render: (f) => f.etiqueta },
+                  { clave: 'trimestre', titulo: 'Trimestre', render: (f) => f.etiqueta },
                   { clave: 'proyecto', titulo: 'Proyecto', render: (f) => f.proyecto },
                   { clave: 'costo', titulo: 'Tarifa', numerica: true, render: (f) => formatoTarifa(f.costo_kwh) },
                 ]}
-                filas={datos.tarifas.aplicadasPorMes}
-                claveFila={(f) => `${f.anio}-${f.mes}-${f.proyecto}`}
+                filas={datos.tarifas.aplicadasPorTrimestre}
+                claveFila={(f) => `${f.anio}-${f.trimestre}-${f.proyecto}`}
                 vacioTitulo="No hay tarifas aprobadas en el periodo"
-                vacioDescripcion="Registre y apruebe las tarifas mensuales desde el detalle de cada proyecto."
+                vacioDescripcion="Registre y apruebe la tarifa de cada trimestre desde el detalle del proyecto."
               />
             </section>
 

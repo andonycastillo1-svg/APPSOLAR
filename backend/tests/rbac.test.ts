@@ -4,6 +4,7 @@ import {
   comoUsuario,
   crearDatosBase,
   crearUsuario,
+  cuerpoAltaProyecto,
   iniciarSesion,
   PASSWORD_PRUEBAS,
   prepararBaseDeDatos,
@@ -103,7 +104,7 @@ describe('Control de acceso basado en roles', () => {
         ejecutar: (s, d) =>
           comoUsuario(s)
             .post('/api/projects')
-            .send({ id_cliente: d.idCliente, nombre: `Proyecto RBAC ${Math.random()}`, tipo_proyecto: 'PPA' }),
+            .send(cuerpoAltaProyecto(d.idCliente, `Proyecto RBAC ${Math.random()}`)),
         esperado: { admin: 201, operativo: 403, coordinador: 403, gerencial: 403 },
       },
       {
@@ -111,15 +112,25 @@ describe('Control de acceso basado en roles', () => {
         ejecutar: (s, d) =>
           comoUsuario(s)
             .post('/api/inverters')
-            .send({ id_proyecto: d.idProyecto, marca: 'SMA', modelo: `M-${Math.random()}` }),
+            .send({
+              id_proyecto: d.idProyecto,
+              id_grupo: d.idGrupo,
+              marca: 'SMA',
+              modelo: `M-${Math.random()}`,
+            }),
         esperado: { admin: 201, operativo: 201, coordinador: 201, gerencial: 403 },
       },
       {
-        descripcion: 'registrar una tarifa mensual',
+        descripcion: 'registrar una tarifa trimestral',
         ejecutar: (s, d) =>
           comoUsuario(s)
             .post(`/api/projects/${d.idProyecto}/rates`)
-            .send({ anio: 2030, mes: Math.floor(Math.random() * 12) + 1, costo_kwh: 1.1 }),
+            .send({
+              // Cada rol prueba en un anio distinto para no chocar entre si.
+              anio: 2030 + Math.floor(Math.random() * 50),
+              trimestre: Math.floor(Math.random() * 4) + 1,
+              costo_kwh: 1.1,
+            }),
         esperado: { admin: 201, operativo: 403, coordinador: 201, gerencial: 403 },
       },
       {

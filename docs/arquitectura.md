@@ -108,10 +108,15 @@ APPSOLAR/
 
 ### 4.2 Valorización monetaria
 
+El costo del kWh se pacta **por trimestre calendario**: los tres meses de un trimestre
+comparten siempre la misma tarifa.
+
 ```
 registro de producción (kwh, fecha)
         │
-        ├─► se busca la tarifa APROBADA del proyecto para (año, mes) de la fecha
+        ├─► trimestre = CEIL(mes / 3)      I: ene–mar · II: abr–jun
+        │                                  III: jul–sep · IV: oct–dic
+        ├─► se busca la tarifa APROBADA del proyecto para (año, trimestre)
         │
         ├─ existe ──► valor_q = kwh × costo_kwh   [se guarda id_tarifa y costo aplicado]
         │             estado = VALORIZADA
@@ -120,19 +125,34 @@ registro de producción (kwh, fecha)
                        estado = PENDIENTE_DE_TARIFA   ← los kWh se conservan intactos
 ```
 
-En rangos multi-mes **se valoriza registro por registro y luego se suma**. Nunca se
+En rangos multi-trimestre **se valoriza registro por registro y luego se suma**. Nunca se
 multiplica el total del rango por una sola tarifa. Al aprobar una tarifa faltante se
-recalculan únicamente los registros pendientes de ese proyecto y mes.
+recalculan únicamente los registros pendientes de ese proyecto y trimestre.
+
+**Aviso de actualización trimestral.** Como la tarifa caduca cada trimestre, el sistema
+avisa cuando el trimestre en curso no tiene tarifa aprobada, y con anticipación
+configurable (`tarifa.dias_aviso_trimestre`, por omisión 15 días) cuando el siguiente
+tampoco la tiene. El aviso se publica en el tablero y en la pantalla de tarifas.
 
 ### 4.3 Prevención del doble conteo
 
-La producción puede existir en dos niveles y dos granularidades. Sumar ambos duplicaría
-la energía, por lo que las consultas agregadas resuelven cuál prevalece:
+La producción puede existir en **tres niveles** y dos granularidades. Sumar varios de ellos
+duplicaría la energía, por lo que las consultas agregadas resuelven cuál prevalece:
+
+```
+PROYECTO ─► GRUPO ─► INVERSOR        (de menor a mayor detalle)
+```
 
 | Situación | Prevalece | Se ignora |
 |---|---|---|
-| Un mes tiene detalle por inversor y consolidado de proyecto | `POR_INVERSOR` | El consolidado de ese mes |
+| Un grupo tiene, en la misma fecha, detalle por inversor y consolidado de grupo | `POR_INVERSOR` | El consolidado del grupo en esa fecha |
+| Un proyecto tiene, en la misma fecha, datos con grupo y un consolidado de proyecto | El nivel con grupo | El consolidado de proyecto en esa fecha |
 | Un inversor tiene lecturas diarias y un cierre mensual del mismo mes | `DIARIA` | El registro `MENSUAL` |
+
+> **La resolución de niveles es por `(grupo, fecha)`, nunca por mes.** Es una decisión
+> deliberada: si fuera por mes, la carga manual de un grupo incomunicado se descartaría solo
+> porque ese mismo mes tiene detalle por inversor en otros días. Con la resolución por fecha,
+> cada día conserva su mejor dato disponible y nada se pierde.
 
 Ambas reglas se implementan con CTEs en `services/consultasProduccion.ts` y los periodos
 afectados se reportan al usuario en el tablero y en las consultas, nunca en silencio.

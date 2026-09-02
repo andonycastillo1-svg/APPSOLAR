@@ -21,6 +21,7 @@ export interface FiltrosProduccion {
   hasta: string;
   idCliente?: number | null;
   idProyecto?: number | null;
+  idGrupo?: number | null;
   idInversor?: number | null;
   idsInversores?: number[] | null;
 }
@@ -31,33 +32,63 @@ interface Fragmento {
 }
 
 const CTE_NIVELES = `
-WITH niveles AS (
-  SELECT id_proyecto, anio, mes,
-         MAX(nivel_detalle = 'POR_INVERSOR') AS tiene_detalle
+WITH niveles_grupo AS (
+  -- Dentro de CADA grupo y para CADA FECHA: se sabe si hay detalle por inversor.
+  --
+  -- La resolucion es por fecha y no por mes a proposito: cuando un grupo pierde
+  -- la conexion unos dias y esos dias se cargan manualmente como consolidado
+  -- del grupo, esos registros DEBEN sumarse aunque el resto del mes si tenga
+  -- detalle por inversor. Resolver por mes los descartaria y se perderia
+  -- informacion real.
+  SELECT id_proyecto, grupo_key, fecha,
+         MAX(nivel_detalle = 'POR_INVERSOR') AS tiene_inversor
     FROM produccion
    WHERE activo = 1
-   GROUP BY id_proyecto, anio, mes
+   GROUP BY id_proyecto, grupo_key, fecha
+),
+niveles_proyecto AS (
+  -- Para CADA proyecto y fecha: se sabe si existe algun dato a nivel de grupo.
+  SELECT id_proyecto, fecha,
+         MAX(id_grupo IS NOT NULL) AS tiene_grupo
+    FROM produccion
+   WHERE activo = 1
+   GROUP BY id_proyecto, fecha
 ),
 granularidades AS (
-  SELECT id_proyecto, inversor_key, anio, mes,
+  -- Para cada equipo o grupo: se sabe si hay lecturas diarias en el mes.
+  SELECT id_proyecto, grupo_key, inversor_key, anio, mes,
          MAX(granularidad = 'DIARIA') AS tiene_diaria
     FROM produccion
    WHERE activo = 1
-   GROUP BY id_proyecto, inversor_key, anio, mes
+   GROUP BY id_proyecto, grupo_key, inversor_key, anio, mes
 )`;
 
 /**
  * Condicion que descarta el nivel de detalle redundante.
- * Si el mes tiene detalle por inversor, el consolidado de ese mes no se suma.
+ *
+ * Precedencia:  POR_INVERSOR  >  GRUPO_CONSOLIDADO  >  PROYECTO_CONSOLIDADO
+ *
+ * La resolucion se hace POR GRUPO, no por proyecto. Si el grupo A tiene
+ * detalle por inversor y el grupo B solo su consolidado (porque perdio la
+ * conexion con Huawei y se cargo manualmente), AMBOS se suman: descartar B
+ * perderia informacion real.
+ *
+ * El consolidado de proyecto solo interviene cuando el mes no tiene ningun
+ * dato a nivel de grupo.
  */
 const SIN_DOBLE_CONTEO = `
-  ((n.tiene_detalle = 1 AND p.nivel_detalle = 'POR_INVERSOR')
-    OR (n.tiene_detalle = 0 AND p.nivel_detalle = 'PROYECTO_CONSOLIDADO'))`;
+  (
+    (p.id_grupo IS NOT NULL AND ng.tiene_inversor = 1 AND p.nivel_detalle = 'POR_INVERSOR')
+    OR
+    (p.id_grupo IS NOT NULL AND ng.tiene_inversor = 0 AND p.nivel_detalle = 'GRUPO_CONSOLIDADO')
+    OR
+    (p.id_grupo IS NULL AND np.tiene_grupo = 0 AND p.nivel_detalle = 'PROYECTO_CONSOLIDADO')
+  )`;
 
 /**
- * Condicion equivalente para la granularidad: si un inversor tiene lecturas
- * DIARIAS en un mes, el cierre MENSUAL de ese mismo mes no se suma (seria el
- * mismo dato agregado dos veces).
+ * Condicion equivalente para la granularidad: si un equipo o grupo tiene
+ * lecturas DIARIAS en un mes, el cierre MENSUAL de ese mismo mes no se suma
+ * (seria el mismo dato agregado dos veces).
  */
 const SIN_MEZCLA_GRANULARIDAD = `
   ((g.tiene_diaria = 1 AND p.granularidad = 'DIARIA')
@@ -65,11 +96,16 @@ const SIN_MEZCLA_GRANULARIDAD = `
 
 const JOIN_BASE = `
   FROM produccion p
-  JOIN niveles n ON n.id_proyecto = p.id_proyecto AND n.anio = p.anio AND n.mes = p.mes
-  JOIN granularidades g ON g.id_proyecto = p.id_proyecto AND g.inversor_key = p.inversor_key
+  JOIN niveles_grupo ng ON ng.id_proyecto = p.id_proyecto AND ng.grupo_key = p.grupo_key
+                       AND ng.fecha = p.fecha
+  JOIN niveles_proyecto np ON np.id_proyecto = p.id_proyecto
+                          AND np.fecha = p.fecha
+  JOIN granularidades g ON g.id_proyecto = p.id_proyecto AND g.grupo_key = p.grupo_key
+                       AND g.inversor_key = p.inversor_key
                        AND g.anio = p.anio AND g.mes = p.mes
   JOIN proyectos pr ON pr.id_proyecto = p.id_proyecto
   JOIN clientes c ON c.id_cliente = pr.id_cliente
+  LEFT JOIN grupos gr ON gr.id_grupo = p.id_grupo
   LEFT JOIN inversores i ON i.id_inversor = p.id_inversor`;
 
 function construirFiltros(f: FiltrosProduccion, aplicarNivel = true): Fragmento {
@@ -84,6 +120,10 @@ function construirFiltros(f: FiltrosProduccion, aplicarNivel = true): Fragmento 
   if (f.idProyecto) {
     condiciones.push('p.id_proyecto = ?');
     params.push(f.idProyecto);
+  }
+  if (f.idGrupo) {
+    condiciones.push('p.id_grupo = ?');
+    params.push(f.idGrupo);
   }
   if (f.idInversor) {
     condiciones.push('p.id_inversor = ?');
@@ -258,7 +298,8 @@ export async function porInversor(f: FiltrosProduccion): Promise<AgrupacionInver
             COUNT(DISTINCT p.fecha) AS dias_con_datos,
             MAX(p.fecha) AS ultima_fecha
        FROM produccion p
-       JOIN granularidades g ON g.id_proyecto = p.id_proyecto AND g.inversor_key = p.inversor_key
+       JOIN granularidades g ON g.id_proyecto = p.id_proyecto AND g.grupo_key = p.grupo_key
+                            AND g.inversor_key = p.inversor_key
                             AND g.anio = p.anio AND g.mes = p.mes
        JOIN proyectos pr ON pr.id_proyecto = p.id_proyecto
        JOIN clientes c ON c.id_cliente = pr.id_cliente
@@ -338,6 +379,7 @@ export async function compararPeriodos(
 export interface FilaResumenAnual {
   mes: number;
   mesNombre: string;
+  trimestre: number;
   proyeccion_kwh: number | null;
   generacion_anio_anterior: number;
   cumplimiento_anio_anterior: number | null;
@@ -382,8 +424,12 @@ export async function resumenAnual(
             COALESCE(SUM(p.estado_valorizacion = 'PENDIENTE_DE_TARIFA'), 0) AS pendientes,
             SUBSTRING(GROUP_CONCAT(DISTINCT NULLIF(p.comentarios, '') SEPARATOR ' | '), 1, 500) AS comentarios
        FROM produccion p
-       JOIN niveles n ON n.id_proyecto = p.id_proyecto AND n.anio = p.anio AND n.mes = p.mes
-       JOIN granularidades g ON g.id_proyecto = p.id_proyecto AND g.inversor_key = p.inversor_key
+       JOIN niveles_grupo ng ON ng.id_proyecto = p.id_proyecto AND ng.grupo_key = p.grupo_key
+                             AND ng.fecha = p.fecha
+       JOIN niveles_proyecto np ON np.id_proyecto = p.id_proyecto
+                               AND np.fecha = p.fecha
+       JOIN granularidades g ON g.id_proyecto = p.id_proyecto AND g.grupo_key = p.grupo_key
+                            AND g.inversor_key = p.inversor_key
                             AND g.anio = p.anio AND g.mes = p.mes
        JOIN proyectos pr ON pr.id_proyecto = p.id_proyecto
       WHERE ${filtroExtra} AND ${SIN_DOBLE_CONTEO} AND ${SIN_MEZCLA_GRANULARIDAD}
@@ -406,9 +452,10 @@ export async function resumenAnual(
         idCliente ? [anio, idCliente] : [anio],
       );
 
+  // La tarifa es trimestral: cada mes muestra la del trimestre al que pertenece.
   const tarifas = idProyecto
-    ? await query<{ mes: number; costo_kwh: number; estado: string }>(
-        `SELECT mes, costo_kwh, estado FROM tarifas_kwh
+    ? await query<{ trimestre: number; costo_kwh: number; estado: string }>(
+        `SELECT trimestre, costo_kwh, estado FROM tarifas_kwh
           WHERE id_proyecto = ? AND anio = ? AND estado <> 'ANULADA'`,
         [idProyecto, anio],
       )
@@ -416,14 +463,15 @@ export async function resumenAnual(
 
   const mapaProd = new Map(produccion.map((p) => [`${p.anio}-${p.mes}`, p]));
   const mapaProy = new Map(proyecciones.map((p) => [p.mes, Number(p.proyeccion_kwh)]));
-  const mapaTar = new Map(tarifas.map((t) => [t.mes, t]));
+  const mapaTar = new Map(tarifas.map((t) => [t.trimestre, t]));
 
   const filas: FilaResumenAnual[] = Array.from({ length: 12 }, (_, i) => {
     const mes = i + 1;
     const actual = mapaProd.get(`${anio}-${mes}`);
     const previo = mapaProd.get(`${anio - 1}-${mes}`);
     const proyeccion = mapaProy.get(mes) ?? null;
-    const tarifa = mapaTar.get(mes) ?? null;
+    const trimestre = Math.ceil(mes / 3);
+    const tarifa = mapaTar.get(trimestre) ?? null;
     const genActual = redondear(Number(actual?.kwh ?? 0), 4);
     const genPrevio = redondear(Number(previo?.kwh ?? 0), 4);
     const pendiente = Number(actual?.pendientes ?? 0) > 0;
@@ -436,6 +484,7 @@ export async function resumenAnual(
       cumplimiento_anio_anterior: porcentajeCumplimiento(genPrevio, proyeccion),
       generacion_anio_seleccionado: genActual,
       cumplimiento_anio_seleccionado: porcentajeCumplimiento(genActual, proyeccion),
+      trimestre,
       tarifa_q_kwh: tarifa && tarifa.estado === 'APROBADA' ? Number(tarifa.costo_kwh) : null,
       estado_tarifa: tarifa?.estado ?? null,
       valor_producido_q: pendiente ? null : redondear(Number(actual?.valor_q ?? 0), 4),
@@ -476,6 +525,7 @@ export async function detalle(
   const { donde, params } = construirFiltros(f, false);
   const filas = await query(
     `SELECT p.id_produccion, p.id_proyecto, pr.nombre AS proyecto, c.nombre AS cliente,
+            p.id_grupo, gr.nombre AS grupo,
             p.id_inversor, i.marca, i.modelo, i.serial_externo,
             p.nivel_detalle, p.fecha, p.anio, p.mes, p.granularidad, p.kwh, p.origen,
             p.secuencia, p.costo_kwh_aplicado, p.valor_q, p.estado_valorizacion,
@@ -483,6 +533,7 @@ export async function detalle(
        FROM produccion p
        JOIN proyectos pr ON pr.id_proyecto = p.id_proyecto
        JOIN clientes c ON c.id_cliente = pr.id_cliente
+       LEFT JOIN grupos gr ON gr.id_grupo = p.id_grupo
        LEFT JOIN inversores i ON i.id_inversor = p.id_inversor
       WHERE ${donde}
       ORDER BY ${ordenColumna} ${direccion}, p.id_produccion DESC
@@ -502,14 +553,125 @@ export async function detalle(
   return { filas, total: Number(total?.total ?? 0) };
 }
 
-/** Proyectos/meses donde coexisten ambos niveles de detalle (aviso operativo). */
+/**
+ * Periodos donde coexisten varios niveles de detalle (aviso operativo).
+ * No es un error: ocurre, por ejemplo, cuando un grupo perdio la conexion y
+ * su produccion se cargo consolidada mientras el resto llego por inversor.
+ * El sistema resuelve la precedencia automaticamente, pero lo informa.
+ */
 export async function periodosConMezclaDeNiveles(f: FiltrosProduccion) {
-  return query<{ id_proyecto: number; proyecto: string; anio: number; mes: number }>(
-    `SELECT p.id_proyecto, pr.nombre AS proyecto, p.anio, p.mes
+  return query<{
+    id_proyecto: number;
+    proyecto: string;
+    anio: number;
+    mes: number;
+    niveles: string;
+  }>(
+    `SELECT p.id_proyecto, pr.nombre AS proyecto, p.anio, p.mes,
+            GROUP_CONCAT(DISTINCT p.nivel_detalle ORDER BY p.nivel_detalle) AS niveles
        FROM produccion p JOIN proyectos pr ON pr.id_proyecto = p.id_proyecto
       WHERE p.activo = 1 AND p.fecha BETWEEN ? AND ?
       GROUP BY p.id_proyecto, pr.nombre, p.anio, p.mes
-     HAVING COUNT(DISTINCT p.nivel_detalle) > 1`,
+     HAVING COUNT(DISTINCT p.nivel_detalle) > 1
+      ORDER BY p.anio, p.mes`,
     [f.desde, f.hasta],
+  );
+}
+
+export interface AgrupacionGrupo {
+  id_grupo: number;
+  grupo: string;
+  proyecto: string;
+  tiene_banco_baterias: number;
+  capacidad_kwp: number | null;
+  inversores_registrados: number;
+  cantidad_inversores_declarada: number | null;
+  kwh: number;
+  valor_q: number;
+  ultima_fecha: string | null;
+}
+
+/** Agrupacion por grupo de inversores, respetando la precedencia de niveles. */
+export async function porGrupo(f: FiltrosProduccion): Promise<AgrupacionGrupo[]> {
+  const { donde, params } = construirFiltros(f);
+  const filas = await query<AgrupacionGrupo>(
+    `${CTE_NIVELES}
+     SELECT p.id_grupo, gr.nombre AS grupo, pr.nombre AS proyecto,
+            gr.tiene_banco_baterias, gr.capacidad_kwp,
+            gr.cantidad_inversores_declarada,
+            (SELECT COUNT(*) FROM inversores inv
+              WHERE inv.id_grupo = gr.id_grupo AND inv.activo = 1) AS inversores_registrados,
+            COALESCE(SUM(p.kwh), 0) AS kwh,
+            COALESCE(SUM(p.valor_q), 0) AS valor_q,
+            MAX(p.fecha) AS ultima_fecha
+       ${JOIN_BASE}
+      WHERE ${donde} AND p.id_grupo IS NOT NULL
+      GROUP BY p.id_grupo, gr.nombre, pr.nombre, gr.tiene_banco_baterias,
+               gr.capacidad_kwp, gr.cantidad_inversores_declarada
+      ORDER BY kwh DESC`,
+    params,
+  );
+  return filas.map((fila) => ({
+    ...fila,
+    kwh: redondear(Number(fila.kwh), 4),
+    valor_q: redondear(Number(fila.valor_q), 4),
+    inversores_registrados: Number(fila.inversores_registrados),
+  }));
+}
+
+/**
+ * Detecta los rangos de fechas SIN datos de cada grupo dentro de un periodo.
+ *
+ * Es la base del requerimiento de carga manual: cuando un grupo pierde la
+ * conexion con Huawei, el operador necesita ver exactamente que dias faltan
+ * para completarlos a mano.
+ */
+export async function huecosDeDatos(
+  f: FiltrosProduccion,
+): Promise<Array<{
+  id_grupo: number;
+  grupo: string;
+  id_proyecto: number;
+  proyecto: string;
+  dias_esperados: number;
+  dias_con_datos: number;
+  dias_faltantes: number;
+  primera_fecha: string | null;
+  ultima_fecha: string | null;
+}>> {
+  const condiciones: string[] = ['g.activo = 1', 'pr.activo = 1'];
+  const params: unknown[] = [f.desde, f.hasta, f.desde, f.hasta];
+
+  if (f.idProyecto) {
+    condiciones.push('g.id_proyecto = ?');
+    params.push(f.idProyecto);
+  }
+  if (f.idGrupo) {
+    condiciones.push('g.id_grupo = ?');
+    params.push(f.idGrupo);
+  }
+  if (f.idCliente) {
+    condiciones.push('pr.id_cliente = ?');
+    params.push(f.idCliente);
+  }
+
+  return query(
+    `SELECT g.id_grupo, g.nombre AS grupo, pr.id_proyecto, pr.nombre AS proyecto,
+            DATEDIFF(?, ?) + 1 AS dias_esperados,
+            COUNT(DISTINCT p.fecha) AS dias_con_datos,
+            GREATEST(0, (DATEDIFF(?, ?) + 1) - COUNT(DISTINCT p.fecha)) AS dias_faltantes,
+            MIN(p.fecha) AS primera_fecha,
+            MAX(p.fecha) AS ultima_fecha
+       FROM grupos g
+       JOIN proyectos pr ON pr.id_proyecto = g.id_proyecto
+       LEFT JOIN produccion p
+              ON p.id_grupo = g.id_grupo AND p.activo = 1
+             AND p.granularidad = 'DIARIA'
+             AND p.fecha BETWEEN ? AND ?
+      WHERE ${condiciones.join(' AND ')}
+      GROUP BY g.id_grupo, g.nombre, pr.id_proyecto, pr.nombre
+     HAVING dias_faltantes > 0
+      ORDER BY dias_faltantes DESC`,
+    [f.hasta, f.desde, f.hasta, f.desde, f.desde, f.hasta, ...params.slice(4)],
   );
 }

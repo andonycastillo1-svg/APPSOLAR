@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, ErrorApi } from '../lib/api';
 import { useSesion } from '../lib/auth';
 import { useListado } from '../hooks/useListado';
-import { useCatalogos } from '../hooks/useCatalogos';
+import { useCatalogos, useGrupos } from '../hooks/useCatalogos';
 import { CampoArea, CampoCasilla, CampoSelect, CampoTexto } from '../components/Campos';
 import {
   Cargando,
@@ -21,6 +21,10 @@ interface Inversor {
   id_inversor: number;
   id_proyecto: number;
   proyecto: string;
+  /** Jerarquia PROYECTO -> GRUPO -> INVERSOR. */
+  id_grupo: number;
+  grupo: string;
+  tiene_banco_baterias: number;
   cliente: string;
   marca: string;
   modelo: string;
@@ -67,6 +71,7 @@ interface DetalleInversor extends Inversor {
 
 const VACIO = {
   id_proyecto: '',
+  id_grupo: '',
   marca: '',
   modelo: '',
   tipo_conexion: 'MANUAL',
@@ -88,13 +93,19 @@ export function PaginaInversores() {
 
   useEffect(() => {
     const proyecto = parametros.get('proyecto');
+    const grupo = parametros.get('id_grupo');
     if (proyecto) listado.actualizar({ id_proyecto: proyecto });
+    if (grupo) listado.actualizar({ id_grupo: grupo });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parametros]);
 
   const [formulario, setFormulario] = useState<typeof VACIO | null>(null);
   const [editando, setEditando] = useState<number | null>(null);
   const [detalle, setDetalle] = useState<number | null>(null);
+
+  // Los grupos dependen del proyecto: uno para el filtro y otro para el alta.
+  const gruposDelFiltro = useGrupos(listado.estado.id_proyecto as string | undefined);
+  const gruposDelFormulario = useGrupos(formulario?.id_proyecto);
   const [aEliminar, setAEliminar] = useState<Inversor | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [exito, setExito] = useState<string | null>(null);
@@ -122,6 +133,7 @@ export function PaginaInversores() {
       const cuerpo = {
         ...formulario,
         id_proyecto: Number(formulario.id_proyecto),
+        id_grupo: formulario.id_grupo === '' ? undefined : Number(formulario.id_grupo),
         capacidad_kwp: formulario.capacidad_kwp === '' ? null : Number(formulario.capacidad_kwp),
         serial_externo: formulario.serial_externo || null,
         estacion_externa: formulario.estacion_externa || null,
@@ -201,11 +213,27 @@ export function PaginaInversores() {
           <CampoSelect
             etiqueta="Proyecto"
             value={String(listado.estado.id_proyecto ?? '')}
-            onChange={(e) => listado.actualizar({ id_proyecto: e.target.value })}
+            onChange={(e) => listado.actualizar({ id_proyecto: e.target.value, id_grupo: '' })}
           >
             <option value="">Todos los proyectos</option>
             {catalogos.proyectos.map((p) => (
               <option key={p.id_proyecto} value={p.id_proyecto}>{p.nombre}</option>
+            ))}
+          </CampoSelect>
+          <CampoSelect
+            etiqueta="Grupo de inversores"
+            value={String(listado.estado.id_grupo ?? '')}
+            disabled={!gruposDelFiltro.habilitado}
+            ayuda={
+              gruposDelFiltro.habilitado
+                ? undefined
+                : 'Seleccione primero un proyecto para filtrar por grupo.'
+            }
+            onChange={(e) => listado.actualizar({ id_grupo: e.target.value })}
+          >
+            <option value="">Todos los grupos</option>
+            {gruposDelFiltro.grupos.map((g) => (
+              <option key={g.id_grupo} value={g.id_grupo}>{g.nombre}</option>
             ))}
           </CampoSelect>
           <CampoSelect
@@ -247,6 +275,20 @@ export function PaginaInversores() {
               ),
             },
             { clave: 'proyecto', titulo: 'Proyecto', orden: 'proyecto', render: (f) => f.proyecto },
+            {
+              clave: 'grupo',
+              titulo: 'Grupo',
+              render: (f) => (
+                <span>
+                  {f.grupo}
+                  {f.tiene_banco_baterias ? (
+                    <div>
+                      <span className="etiqueta etiqueta--verde">Con baterias</span>
+                    </div>
+                  ) : null}
+                </span>
+              ),
+            },
             { clave: 'serial', titulo: 'Identificador', render: (f) => f.serial_externo ?? '—' },
             {
               clave: 'conexion',
@@ -293,6 +335,7 @@ export function PaginaInversores() {
                           setError(null);
                           setFormulario({
                             id_proyecto: String(f.id_proyecto),
+                            id_grupo: String(f.id_grupo),
                             marca: f.marca,
                             modelo: f.modelo,
                             tipo_conexion: f.tipo_conexion,
@@ -346,12 +389,41 @@ export function PaginaInversores() {
                 value={formulario.id_proyecto}
                 error={erroresCampo.id_proyecto}
                 ayuda="Un inversor no puede existir sin proyecto."
-                onChange={(e) => setFormulario({ ...formulario, id_proyecto: e.target.value })}
+                onChange={(e) =>
+                  setFormulario({ ...formulario, id_proyecto: e.target.value, id_grupo: '' })
+                }
               >
                 <option value="">Seleccione un proyecto</option>
                 {catalogos.proyectos.map((p) => (
                   <option key={p.id_proyecto} value={p.id_proyecto}>{p.nombre}</option>
                 ))}
+              </CampoSelect>
+              <CampoSelect
+                etiqueta="Grupo de inversores"
+                obligatorio
+                value={formulario.id_grupo}
+                error={erroresCampo.id_grupo}
+                disabled={!gruposDelFormulario.habilitado}
+                ayuda={
+                  !gruposDelFormulario.habilitado
+                    ? 'Seleccione primero el proyecto.'
+                    : gruposDelFormulario.grupos.length === 0
+                      ? 'Este proyecto aun no tiene grupos. Crealos desde el detalle del proyecto.'
+                      : 'Todo inversor pertenece a un grupo dentro del proyecto.'
+                }
+                onChange={(e) => setFormulario({ ...formulario, id_grupo: e.target.value })}
+              >
+                <option value="">Seleccione un grupo</option>
+                {gruposDelFormulario.grupos
+                  .filter((g) => g.activo || String(g.id_grupo) === formulario.id_grupo)
+                  .map((g) => (
+                    <option key={g.id_grupo} value={g.id_grupo}>
+                      {g.nombre}
+                      {g.cantidad_inversores_declarada !== null
+                        ? ` (${g.inversores_registrados} de ${g.cantidad_inversores_declarada})`
+                        : ''}
+                    </option>
+                  ))}
               </CampoSelect>
               <CampoTexto
                 etiqueta="Marca"

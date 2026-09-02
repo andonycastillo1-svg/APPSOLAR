@@ -43,25 +43,33 @@ Sistema Centralizado de Monitoreo Energético · Retse, S.A.
 ## 2. Manual del usuario **gerencial** (solo lectura)
 
 ### Tablero
-Menú **Analisis → Tablero**. Elija cliente, proyecto, inversor y rango de fechas.
+Menú **Analisis → Tablero**. Elija cliente, proyecto, **grupo**, inversor y rango de fechas.
 
 Verá: producción del periodo, valor económico, proyección y **% de cumplimiento**,
-variación contra el periodo anterior equivalente, producción de hoy/mes/año, catálogos
-activos y equivalencias ambientales.
+variación contra el periodo anterior equivalente, producción de hoy/mes/año, **generación
+por grupo de inversores**, catálogos activos y equivalencias ambientales.
 
-> ⚠️ Si aparece **“Valorización parcial”**, hay meses sin tarifa aprobada. La energía es
+> ⚠️ Si aparece **“Valorización parcial”**, hay trimestres sin tarifa aprobada. La energía es
 > correcta, pero el monto en quetzales está incompleto: no lo use como cifra oficial.
+
+> 🟠 Si aparece **“Actualización trimestral de la tarifa pendiente”**, el trimestre en curso
+> (o el siguiente, si ya está por comenzar) no tiene tarifa aprobada. El aviso enlaza
+> directamente con los proyectos afectados.
 
 ### Resumen anual (equivalente al Excel de referencia)
 Menú **Analisis → Resumen anual**. Seleccione año, cliente y planta.
 
-La tabla muestra las 12 filas de enero a diciembre con: proyección kWh, generación del año
-anterior, % de cumplimiento del año anterior, generación del año seleccionado, % de
-cumplimiento, tarifa Q/kWh y valor producido; más la fila de totales anuales y la gráfica
-comparativa.
+La tabla muestra las 12 filas de enero a diciembre con: **trimestre**, proyección kWh,
+generación del año anterior, % de cumplimiento del año anterior, generación del año
+seleccionado, % de cumplimiento, tarifa Q/kWh y valor producido; más la fila de totales
+anuales y la gráfica comparativa.
 
 > La columna **Tarifa Q/kWh** solo se muestra al elegir un proyecto concreto, porque cada
-> proyecto tiene su propia tarifa mensual.
+> proyecto tiene su propia tarifa. Los tres meses de un mismo trimestre muestran **la misma
+> tarifa**: el costo del kWh se pacta por trimestre.
+
+> La proyección con la que se compara es la que se capturó **al crear el proyecto**. Es el
+> compromiso pactado desde el inicio, y por eso es la base del % de cumplimiento.
 
 ### Reportes
 Menú **Analisis → Reportes**.
@@ -71,7 +79,8 @@ Menú **Analisis → Reportes**.
 3. Exporte a **PDF**, **XLSX** o **CSV**, o use **Vista de impresión**.
 
 > ⚠️ Si el reporte indica que **no puede considerarse un documento oficial completo**, hay
-> meses sin tarifa aprobada. Solicite al coordinador que las registre antes de distribuirlo.
+> trimestres sin tarifa aprobada. Solicite al coordinador que las registre antes de
+> distribuirlo.
 
 ### Gráficas accesibles
 Toda gráfica incluye **“Ver los datos de la gráfica en forma de tabla”**: la información
@@ -129,11 +138,42 @@ Menú **Operacion → Integracion Huawei**.
 > real aún no está activada.
 
 ### Consultar y validar producción
-Menú **Operacion → Produccion**. Filtre por periodo, cliente, proyecto e inversor.
+Menú **Operacion → Produccion**. Filtre por periodo, cliente, proyecto, **grupo** e inversor.
 Puede registrar producción manual y exportar la consulta.
 
-En la tabla, la columna **Valor** muestra “Pendiente de tarifa” cuando el mes aún no tiene
-tarifa aprobada. La energía es válida; solo falta la valorización.
+En la tabla, la columna **Valor** muestra “Pendiente de tarifa” cuando el trimestre aún no
+tiene tarifa aprobada. La energía es válida; solo falta la valorización.
+
+### Completar datos que el fabricante no entregó
+
+Cuando un **grupo de inversores** pierde la conexión con Huawei, sus días quedan sin
+lecturas. El sistema no los inventa: los muestra y le permite completarlos a mano para que
+el histórico del proyecto quede íntegro.
+
+1. En **Operacion → Produccion**, elija el periodo y el proyecto. Si hay días sin datos,
+   aparece la tarjeta **“Grupos con días sin datos”** con los días esperados, los que sí
+   tienen lectura y los que faltan.
+2. Pulse **Completar manualmente** en el grupo afectado (o **Cargar rango de un grupo** en
+   la barra superior).
+3. Indique el **rango de fechas** y cómo debe interpretarse la cifra:
+   - **Total del rango** — el sistema la reparte en partes iguales entre los días.
+   - **Valor de cada día** — la misma cifra se repite en todos los días del rango.
+   El formulario muestra por adelantado cuántos días cubre y cuántos kWh corresponden a
+   cada uno.
+4. Escriba el **motivo** (mínimo 10 caracteres). Queda en la auditoría y en el comentario
+   de cada día cargado.
+5. Confirme. El registro se guarda como **consolidado del grupo**, sin inversor asociado.
+
+Puntos importantes:
+
+- **Repetir la misma carga no duplica nada**: los días que ya tenían carga manual se omiten
+  y el sistema le informa cuántos fueron. Marque *sobrescribir* solo si desea reemplazarlos
+  con cifras corregidas.
+- Si el grupo ya tiene un **cierre mensual** de ese mes, el sistema **bloquea** la carga
+  diaria: esa cifra mensual ya cubre el mes completo y agregar días sueltos contaría la
+  energía dos veces. Corrija el registro mensual, o confirme expresamente la mezcla.
+- La carga manual de un grupo **nunca se pierde** aunque otro grupo del mismo proyecto
+  reporte por inversor esos mismos días.
 
 ---
 
@@ -143,17 +183,33 @@ Un usuario operativo con el permiso `tarifas.gestionar`.
 
 Menú **Catalogos → Proyectos → (elegir proyecto) → Tarifas de energia**.
 
-1. Seleccione el año. Verá el calendario de los 12 meses con su tarifa, estado, autor,
-   producción asociada y si el periodo está cerrado.
-2. En un mes sin tarifa pulse **Registrar** e ingrese el costo del kWh en GTQ
-   (se almacena con 6 decimales).
-3. También puede **Copiar mes anterior**: el sistema pide confirmación explícita y crea
-   un **BORRADOR**; nunca aplica la copia en silencio.
-4. Un administrador debe **Aprobar** la tarifa para que tenga efecto. Al aprobarla, el
-   sistema valoriza automáticamente los registros de ese mes que estaban pendientes.
+> **La tarifa del kWh se actualiza cada trimestre**, no cada mes. Los tres meses de un
+> trimestre comparten siempre el mismo costo por kWh.
 
-> Los meses marcados en rojo tienen producción registrada **sin tarifa aprobada**:
+1. Seleccione el año. Verá el calendario de los **4 trimestres** (I: enero a marzo,
+   II: abril a junio, III: julio a septiembre, IV: octubre a diciembre) con su tarifa,
+   estado, autor, producción asociada y qué meses están cerrados.
+2. En un trimestre sin tarifa pulse **Registrar** e ingrese el costo del kWh en GTQ
+   (se almacena con 6 decimales).
+3. También puede **Copiar trimestre anterior**: el sistema pide confirmación explícita y
+   crea un **BORRADOR**; nunca aplica la copia en silencio.
+4. Un administrador debe **Aprobar** la tarifa para que tenga efecto. Al aprobarla, el
+   sistema valoriza automáticamente los registros pendientes de **los tres meses** del
+   trimestre.
+
+> Los trimestres marcados en rojo tienen producción registrada **sin tarifa aprobada**:
 > son los que requieren atención inmediata.
+
+### Aviso de actualización trimestral
+
+El sistema le recuerda registrar la tarifa a tiempo, en el tablero y en la propia pantalla
+de tarifas. El aviso aparece cuando:
+
+- el **trimestre en curso** no tiene tarifa aprobada, o
+- faltan pocos días para que termine el trimestre y el **siguiente** aún no la tiene.
+
+El número de días de anticipación es configurable en **Administracion → Configuracion**
+(parámetro `tarifa.dias_aviso_trimestre`, por omisión 15 días).
 
 ---
 
@@ -174,11 +230,16 @@ En **Tarifas de energia** de cada proyecto:
 
 - **Aprobar** un borrador.
 - **Corregir** una tarifa ya utilizada: el sistema **exige** primero **Analizar impacto**,
-  que muestra registros afectados, kWh, valor anterior y valor nuevo. Después debe indicar
-  un motivo (mínimo 10 caracteres) y confirmar. Todo queda auditado antes/después.
+  que muestra el trimestre afectado, registros, kWh, valor anterior y valor nuevo. Después
+  debe indicar un motivo (mínimo 10 caracteres) y confirmar. Todo queda auditado
+  antes/después. Si alguno de los tres meses del trimestre está **cerrado**, primero debe
+  reabrirlo.
 - **Anular**: los kWh se conservan intactos y los registros vuelven a *pendiente de tarifa*.
 
 ### Cierre mensual
+El cierre contable sigue siendo **mensual**, aunque la tarifa sea trimestral: al pulsar
+**Cerrar mes** elija cuál de los tres meses del trimestre desea cerrar.
+
 - **Cerrar mes**: solo se permite si no quedan registros sin tarifa aprobada. Un mes
   cerrado no admite cambios de tarifa ni de producción.
 - **Reabrir mes**: requiere motivo y queda registrado en la auditoría.
@@ -187,6 +248,53 @@ En **Tarifas de energia** de cada proyecto:
 En **Proyecciones mensuales** de cada proyecto: capture el calendario anual, copie las
 proyecciones de otro año con un factor de ajuste, y apruébelas. El **año siempre se elige
 de forma explícita**: el sistema nunca lo deduce.
+
+La proyección del primer año **ya se capturó al crear el proyecto** y es obligatoria; aquí
+se agregan los años siguientes o se corrigen los existentes.
+
+---
+
+## 6. Crear un proyecto con su árbol y su proyección
+
+Menú **Catalogos → Proyectos → Nuevo proyecto**. El alta es un asistente de **tres pasos** y
+no se guarda nada hasta terminarlo: proyecto, proyección y grupos se crean juntos, en una
+sola operación.
+
+### Paso 1 · Datos del proyecto
+Cliente propietario, nombre de la planta (debe coincidir con la columna *Planta* de los
+archivos históricos), modalidad comercial, ubicación, **potencia instalada en kWp** y fecha
+de inicio de operación.
+
+### Paso 2 · Proyección anual
+**Obligatorio.** Capture los 12 meses en kWh: es el compromiso pactado desde el inicio y la
+base contra la que se medirá el cumplimiento real de la planta.
+
+> Atajo: escriba el total anual en el campo *Repartir un total anual en partes iguales* y
+> pulse **Repartir en 12 meses**. Después puede ajustar mes por mes según la estacionalidad.
+> Puede escribir `0` en los meses sin generación prevista, pero no dejar ninguno vacío.
+
+### Paso 3 · Grupos de inversores
+Un proyecto se divide en **grupos** y cada grupo agrupa varios **inversores con sus
+seriales**. Para cada grupo indique:
+
+- **Nombre** (por ejemplo, *Bloque A - Campo norte*).
+- **Cantidad de inversores** que llevará. El sistema avisa después si faltan por registrar.
+- Si **cuenta con banco de baterías** y, en ese caso, su capacidad en kWh.
+- Potencia del grupo en kWp y ubicación.
+
+Puede agregar tantos grupos como necesite, o dejar la lista vacía y crearlos más adelante
+desde el detalle del proyecto.
+
+> Los **inversores no se capturan aquí**: una vez creado el proyecto, regístrelos desde
+> **Catalogos → Inversores** eligiendo su grupo. Todo inversor pertenece a un grupo.
+
+### Administrar los grupos después
+Menú **Catalogos → Proyectos → (elegir proyecto) → Grupos de inversores**.
+
+Verá cuántos inversores tiene cada grupo frente a los declarados, si tiene banco de
+baterías, su potencia, la producción acumulada y el último dato recibido. Un grupo con
+inversores o producción asociada **no se elimina: se desactiva**, para conservar el
+histórico.
 
 ### Configuración
 Menú **Administracion → Configuracion**. Ajuste límites de carga, políticas de sesión,
@@ -204,7 +312,7 @@ integración Huawei, más las últimas operaciones de datos. Se actualiza cada 3
 
 ---
 
-## 6. Accesibilidad
+## 7. Accesibilidad
 
 - Toda la aplicación se maneja con teclado; el foco es siempre visible.
 - Enlace **“Saltar al contenido principal”** al inicio de cada página.
@@ -215,17 +323,27 @@ integración Huawei, más las últimas operaciones de datos. Se actualiza cada 3
 
 ---
 
-## 7. Preguntas frecuentes
+## 8. Preguntas frecuentes
 
 **¿Por qué mi reporte dice “monto parcial”?**
-Porque hay meses del periodo sin tarifa aprobada. Regístrelas y el monto se completará.
+Porque hay trimestres del periodo sin tarifa aprobada. Regístrelas y el monto se completará.
 
 **Cargué el mismo archivo dos veces, ¿se duplicó la energía?**
 No. La segunda carga detecta los duplicados y, según la política elegida, actualiza u omite.
 
 **Aparecen dos niveles de detalle en un mes. ¿Se suma todo?**
-No. Cuando existe detalle por inversor, el consolidado de ese mes se ignora en los totales
-para no contar la energía dos veces. El sistema se lo indica explícitamente.
+No. Cuando un grupo tiene detalle por inversor en una fecha, su consolidado de esa misma
+fecha se ignora en los totales para no contar la energía dos veces. El sistema se lo indica
+explícitamente.
+
+**Completé un grupo a mano. ¿Se descarta si los demás grupos sí reportaron?**
+No. La resolución de niveles es **por grupo y por fecha**, así que la carga manual de un
+grupo incomunicado se suma junto al detalle por inversor de los grupos que sí reportaron.
 
 **¿Puedo editar el valor en quetzales?**
-No. El valor siempre se deriva de `kWh × tarifa del mes`. Corrija los kWh o la tarifa.
+No. El valor siempre se deriva de `kWh × tarifa del trimestre`. Corrija los kWh o la tarifa.
+
+**¿Por qué la tarifa de enero, febrero y marzo es la misma?**
+Porque el costo del kWh se pacta **por trimestre calendario**. Los tres meses de un trimestre
+comparten la misma tarifa; para cambiarla a mitad de trimestre debe corregirla, lo que
+revaloriza los tres meses y queda auditado.

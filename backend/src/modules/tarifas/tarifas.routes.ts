@@ -7,23 +7,40 @@ import { requierePermiso, tienePermiso } from '../../middleware/autenticacion';
 import { PERMISOS } from '../../config/permisos';
 import { auditarDesdeRequest } from '../../services/auditoria';
 import {
+  alertaTarifaTrimestral,
   analizarImpacto,
   exigirMesAbierto,
-  mesEstaCerrado,
+  exigirTrimestreAbierto,
+  mesesCerradosDelTrimestre,
   recalcularPendientes,
   recalcularPorTarifa,
 } from '../../services/valorizacion';
-import { MESES_ES, anioActual } from '../../utils/fechas';
+import { obtenerNumero } from '../../services/configuracion';
+import {
+  MESES_ES,
+  TRIMESTRES,
+  anioActual,
+  etiquetaTrimestre,
+  mesesDelTrimestre,
+  nombreMesesTrimestre,
+  trimestreSiguiente,
+} from '../../utils/fechas';
 
 /**
  * Submodulo "Tarifas de energia" de cada proyecto.
+ *
+ * La tarifa del kWh tiene vigencia TRIMESTRAL sobre trimestres calendario
+ * (Ene-Mar, Abr-Jun, Jul-Sep, Oct-Dic) y debe actualizarse cada trimestre.
+ * El sistema avisa cuando el trimestre en curso no tiene tarifa aprobada y
+ * cuando se acerca el cambio de trimestre sin la siguiente registrada.
+ *
  * Montado en `/api/projects/:projectId/rates` (requiere `mergeParams`).
  */
 export const tarifasRouter = Router({ mergeParams: true });
 
 const esquemaCrear = z.object({
   anio: z.coerce.number().int().min(2000).max(2100),
-  mes: z.coerce.number().int().min(1).max(12),
+  trimestre: z.coerce.number().int().min(1, 'El trimestre va de 1 a 4.').max(4),
   costo_kwh: z.coerce.number().min(0, 'El costo del kWh no puede ser negativo.'),
   moneda: z.literal('GTQ').default('GTQ'),
   motivo: z.string().trim().max(500).optional().nullable(),
@@ -32,10 +49,10 @@ const esquemaCrear = z.object({
 
 const esquemaCopia = z.object({
   anio: z.coerce.number().int().min(2000).max(2100),
-  mes: z.coerce.number().int().min(1).max(12),
+  trimestre: z.coerce.number().int().min(1).max(4),
   confirmado: z.literal(true, {
     errorMap: () => ({
-      message: 'Debe confirmar explicitamente la copia de la tarifa del mes anterior.',
+      message: 'Debe confirmar explicitamente la copia de la tarifa del trimestre anterior.',
     }),
   }),
 });
@@ -71,7 +88,7 @@ async function proyectoDe(req: { params: Record<string, string> }): Promise<numb
 }
 
 // ---------------------------------------------------------------------------
-// GET /projects/:projectId/rates?anio=YYYY  -> calendario anual de 12 meses
+// GET /projects/:projectId/rates?anio=YYYY  -> calendario anual de 4 trimestres
 // ---------------------------------------------------------------------------
 tarifasRouter.get(
   '/',
@@ -83,7 +100,7 @@ tarifasRouter.get(
 
     const tarifas = await query<{
       id_tarifa: number;
-      mes: number;
+      trimestre: number;
       costo_kwh: number;
       moneda: string;
       estado: string;
@@ -94,14 +111,14 @@ tarifasRouter.get(
       fecha_aprobacion: string | null;
       updated_at: string;
     }>(
-      `SELECT t.id_tarifa, t.mes, t.costo_kwh, t.moneda, t.estado, t.origen,
+      `SELECT t.id_tarifa, t.trimestre, t.costo_kwh, t.moneda, t.estado, t.origen,
               uc.nombre AS creado_por_nombre, ua.nombre AS aprobado_por_nombre,
               t.fecha_creacion, t.fecha_aprobacion, t.updated_at
          FROM tarifas_kwh t
          LEFT JOIN usuarios uc ON uc.id_usuario = t.creado_por
          LEFT JOIN usuarios ua ON ua.id_usuario = t.aprobado_por
         WHERE t.id_proyecto = ? AND t.anio = ? AND t.estado <> 'ANULADA'
-        ORDER BY t.mes`,
+        ORDER BY t.trimestre`,
       [idProyecto, anio],
     );
 
@@ -110,27 +127,45 @@ tarifasRouter.get(
       [idProyecto, anio],
     );
 
-    const produccion = await query<{ mes: number; registros: number; pendientes: number; kwh: number }>(
-      `SELECT mes, COUNT(*) AS registros,
+    // La produccion se agrega por trimestre para saber que periodos tienen
+    // energia registrada sin tarifa aprobada.
+    const produccion = await query<{
+      trimestre: number;
+      registros: number;
+      pendientes: number;
+      kwh: number;
+    }>(
+      `SELECT CEIL(mes / 3) AS trimestre, COUNT(*) AS registros,
               SUM(estado_valorizacion = 'PENDIENTE_DE_TARIFA') AS pendientes,
               COALESCE(SUM(kwh), 0) AS kwh
-         FROM produccion WHERE id_proyecto = ? AND anio = ? AND activo = 1 GROUP BY mes`,
+         FROM produccion WHERE id_proyecto = ? AND anio = ? AND activo = 1
+        GROUP BY CEIL(mes / 3)`,
       [idProyecto, anio],
     );
 
-    const porMes = new Map(tarifas.map((t) => [t.mes, t]));
-    const cierrePorMes = new Map(cierres.map((c) => [c.mes, c.estado]));
-    const prodPorMes = new Map(produccion.map((p) => [p.mes, p]));
+    const porTrimestre = new Map(tarifas.map((t) => [t.trimestre, t]));
+    const prodPorTrimestre = new Map(produccion.map((p) => [Number(p.trimestre), p]));
+    const cerradosPorMes = new Set(
+      cierres.filter((c) => c.estado === 'CERRADO').map((c) => c.mes),
+    );
 
-    const calendario = Array.from({ length: 12 }, (_, i) => {
-      const mes = i + 1;
-      const tarifa = porMes.get(mes) ?? null;
-      const prod = prodPorMes.get(mes);
+    const calendario = TRIMESTRES.map((definicion) => {
+      const trimestre = definicion.numero;
+      const tarifa = porTrimestre.get(trimestre) ?? null;
+      const prod = prodPorTrimestre.get(trimestre);
+      const meses = mesesDelTrimestre(trimestre);
+      const mesesCerrados = meses.filter((m) => cerradosPorMes.has(m));
+
       return {
-        mes,
-        mesNombre: MESES_ES[i],
+        trimestre,
+        etiqueta: definicion.etiqueta,
+        meses: definicion.meses,
+        mesesNumeros: meses,
+        mesesNombres: meses.map((m) => MESES_ES[m - 1]),
         tarifa,
-        cerrado: cierrePorMes.get(mes) === 'CERRADO',
+        mesesCerrados,
+        cerradoParcial: mesesCerrados.length > 0 && mesesCerrados.length < 3,
+        cerradoCompleto: mesesCerrados.length === 3,
         registrosProduccion: Number(prod?.registros ?? 0),
         registrosPendientes: Number(prod?.pendientes ?? 0),
         kwh: Number(prod?.kwh ?? 0),
@@ -138,17 +173,35 @@ tarifasRouter.get(
       };
     });
 
+    const diasDeAviso = await obtenerNumero('tarifa.dias_aviso_trimestre', 15);
+    const alerta = await alertaTarifaTrimestral(diasDeAviso, idProyecto);
+
     ok(res, {
       anio,
       id_proyecto: idProyecto,
+      periodicidad: 'TRIMESTRAL',
       calendario,
+      alerta,
       resumen: {
-        mesesAprobados: calendario.filter((m) => m.tarifa?.estado === 'APROBADA').length,
-        mesesBorrador: calendario.filter((m) => m.tarifa?.estado === 'BORRADOR').length,
-        mesesSinTarifa: calendario.filter((m) => !m.tarifa).length,
-        mesesConProduccionSinTarifa: calendario.filter((m) => m.requiereAtencion).length,
+        trimestresAprobados: calendario.filter((t) => t.tarifa?.estado === 'APROBADA').length,
+        trimestresBorrador: calendario.filter((t) => t.tarifa?.estado === 'BORRADOR').length,
+        trimestresSinTarifa: calendario.filter((t) => !t.tarifa).length,
+        trimestresConProduccionSinTarifa: calendario.filter((t) => t.requiereAtencion).length,
       },
     });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// GET /projects/:projectId/rates/alert   Alerta de actualizacion trimestral
+// ---------------------------------------------------------------------------
+tarifasRouter.get(
+  '/alert',
+  requierePermiso(PERMISOS.TARIFAS_VER),
+  asyncHandler(async (req, res) => {
+    const idProyecto = await proyectoDe(req);
+    const diasDeAviso = await obtenerNumero('tarifa.dias_aviso_trimestre', 15);
+    ok(res, await alertaTarifaTrimestral(diasDeAviso, idProyecto));
   }),
 );
 
@@ -163,17 +216,17 @@ tarifasRouter.post(
     const idProyecto = await proyectoDe(req);
     const datos = req.body as z.infer<typeof esquemaCrear>;
 
-    await exigirMesAbierto(idProyecto, datos.anio, datos.mes);
+    await exigirTrimestreAbierto(idProyecto, datos.anio, datos.trimestre);
 
     const vigente = await queryOne<{ id_tarifa: number; estado: string }>(
       `SELECT id_tarifa, estado FROM tarifas_kwh
-        WHERE id_proyecto = ? AND anio = ? AND mes = ? AND estado <> 'ANULADA'`,
-      [idProyecto, datos.anio, datos.mes],
+        WHERE id_proyecto = ? AND anio = ? AND trimestre = ? AND estado <> 'ANULADA'`,
+      [idProyecto, datos.anio, datos.trimestre],
     );
     if (vigente) {
       throw errores.conflicto(
-        `Ya existe una tarifa ${vigente.estado.toLowerCase()} para ${MESES_ES[datos.mes - 1]} ${datos.anio}. ` +
-          'Editela o anulela antes de registrar una nueva.',
+        `Ya existe una tarifa ${vigente.estado.toLowerCase()} para el ` +
+          `${etiquetaTrimestre(datos.anio, datos.trimestre)}. Editela o anulela antes de registrar una nueva.`,
         { id_tarifa: vigente.id_tarifa },
       );
     }
@@ -186,13 +239,13 @@ tarifasRouter.post(
 
     const resultado = await execute(
       `INSERT INTO tarifas_kwh
-         (id_proyecto, anio, mes, costo_kwh, moneda, estado, origen, motivo,
+         (id_proyecto, anio, trimestre, mes, costo_kwh, moneda, estado, origen, motivo,
           creado_por, aprobado_por, fecha_aprobacion)
-       VALUES (?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, NULL, ?, ?, ?, 'MANUAL', ?, ?, ?, ?)`,
       [
         idProyecto,
         datos.anio,
-        datos.mes,
+        datos.trimestre,
         datos.costo_kwh,
         datos.moneda,
         apruebaAhora ? 'APROBADA' : 'BORRADOR',
@@ -205,7 +258,7 @@ tarifasRouter.post(
 
     let valorizacion = { registros: 0, kwh: 0, valor: 0 };
     if (apruebaAhora) {
-      valorizacion = await recalcularPendientes(idProyecto, datos.anio, datos.mes);
+      valorizacion = await recalcularPendientes(idProyecto, datos.anio, datos.trimestre);
     }
 
     await auditarDesdeRequest(req, {
@@ -219,10 +272,13 @@ tarifasRouter.post(
     creado(res, {
       id_tarifa: resultado.insertId,
       estado: apruebaAhora ? 'APROBADA' : 'BORRADOR',
+      etiqueta: etiquetaTrimestre(datos.anio, datos.trimestre),
       valorizacion,
       mensaje: apruebaAhora
-        ? `Tarifa aprobada. Se valorizaron ${valorizacion.registros} registro(s) que estaban pendientes.`
-        : 'Tarifa registrada en estado BORRADOR. Debe aprobarse para usarse en reportes oficiales.',
+        ? `Tarifa del ${etiquetaTrimestre(datos.anio, datos.trimestre)} aprobada. ` +
+          `Se valorizaron ${valorizacion.registros} registro(s) que estaban pendientes.`
+        : `Tarifa del ${etiquetaTrimestre(datos.anio, datos.trimestre)} registrada en BORRADOR. ` +
+          'Debe aprobarse para usarse en reportes oficiales.',
     });
   }),
 );
@@ -236,41 +292,42 @@ tarifasRouter.post(
   validarCuerpo(esquemaCopia),
   asyncHandler(async (req, res) => {
     const idProyecto = await proyectoDe(req);
-    const { anio, mes } = req.body as z.infer<typeof esquemaCopia>;
-    await exigirMesAbierto(idProyecto, anio, mes);
+    const { anio, trimestre } = req.body as z.infer<typeof esquemaCopia>;
+    await exigirTrimestreAbierto(idProyecto, anio, trimestre);
 
-    const anioAnterior = mes === 1 ? anio - 1 : anio;
-    const mesAnterior = mes === 1 ? 12 : mes - 1;
+    const anioAnterior = trimestre === 1 ? anio - 1 : anio;
+    const trimestreAnterior = trimestre === 1 ? 4 : trimestre - 1;
 
     const anterior = await queryOne<{ costo_kwh: number; moneda: string }>(
       `SELECT costo_kwh, moneda FROM tarifas_kwh
-        WHERE id_proyecto = ? AND anio = ? AND mes = ? AND estado = 'APROBADA'`,
-      [idProyecto, anioAnterior, mesAnterior],
+        WHERE id_proyecto = ? AND anio = ? AND trimestre = ? AND estado = 'APROBADA'`,
+      [idProyecto, anioAnterior, trimestreAnterior],
     );
     if (!anterior) {
       throw errores.reglaNegocio(
-        `No existe una tarifa aprobada para ${MESES_ES[mesAnterior - 1]} ${anioAnterior}, por lo que no hay nada que copiar.`,
+        `No existe una tarifa aprobada para el ${etiquetaTrimestre(anioAnterior, trimestreAnterior)}, ` +
+          'por lo que no hay nada que copiar.',
       );
     }
 
     const vigente = await queryOne(
       `SELECT id_tarifa FROM tarifas_kwh
-        WHERE id_proyecto = ? AND anio = ? AND mes = ? AND estado <> 'ANULADA'`,
-      [idProyecto, anio, mes],
+        WHERE id_proyecto = ? AND anio = ? AND trimestre = ? AND estado <> 'ANULADA'`,
+      [idProyecto, anio, trimestre],
     );
-    if (vigente) throw errores.conflicto('El mes destino ya tiene una tarifa registrada.');
+    if (vigente) throw errores.conflicto('El trimestre destino ya tiene una tarifa registrada.');
 
     const resultado = await execute(
       `INSERT INTO tarifas_kwh
-         (id_proyecto, anio, mes, costo_kwh, moneda, estado, origen, motivo, creado_por)
-       VALUES (?, ?, ?, ?, ?, 'BORRADOR', 'COPIA_MES_ANTERIOR', ?, ?)`,
+         (id_proyecto, anio, trimestre, mes, costo_kwh, moneda, estado, origen, motivo, creado_por)
+       VALUES (?, ?, ?, NULL, ?, ?, 'BORRADOR', 'COPIA_MES_ANTERIOR', ?, ?)`,
       [
         idProyecto,
         anio,
-        mes,
+        trimestre,
         anterior.costo_kwh,
         anterior.moneda,
-        `Copia confirmada de ${MESES_ES[mesAnterior - 1]} ${anioAnterior}`,
+        `Copia confirmada del ${etiquetaTrimestre(anioAnterior, trimestreAnterior)}`,
         req.usuario!.id_usuario,
       ],
     );
@@ -279,14 +336,14 @@ tarifasRouter.post(
       accion: 'TARIFA_COPIADA',
       entidad: 'tarifas_kwh',
       idEntidad: resultado.insertId,
-      despues: { id_proyecto: idProyecto, anio, mes, costo_kwh: anterior.costo_kwh },
+      despues: { id_proyecto: idProyecto, anio, trimestre, costo_kwh: anterior.costo_kwh },
     });
 
     creado(res, {
       id_tarifa: resultado.insertId,
       costo_kwh: anterior.costo_kwh,
       mensaje:
-        'Se creo un BORRADOR con la tarifa del mes anterior. Revisela y apruebela para que tenga efecto.',
+        'Se creo un BORRADOR con la tarifa del trimestre anterior. Revisela y apruebela para que tenga efecto.',
     });
   }),
 );
@@ -303,10 +360,13 @@ tarifasRouter.put(
     const idTarifa = Number(req.params.rateId);
     const datos = req.body as { costo_kwh: number; motivo?: string };
 
-    const tarifa = await queryOne<{ id_tarifa: number; estado: string; anio: number; mes: number; costo_kwh: number }>(
-      'SELECT * FROM tarifas_kwh WHERE id_tarifa = ? AND id_proyecto = ?',
-      [idTarifa, idProyecto],
-    );
+    const tarifa = await queryOne<{
+      id_tarifa: number;
+      estado: string;
+      anio: number;
+      trimestre: number;
+      costo_kwh: number;
+    }>('SELECT * FROM tarifas_kwh WHERE id_tarifa = ? AND id_proyecto = ?', [idTarifa, idProyecto]);
     if (!tarifa) throw errores.noEncontrado('la tarifa indicada');
 
     if (tarifa.estado !== 'BORRADOR') {
@@ -315,7 +375,7 @@ tarifasRouter.put(
         { usar: `POST /api/projects/${idProyecto}/rates/${idTarifa}/recalculate` },
       );
     }
-    await exigirMesAbierto(idProyecto, tarifa.anio, tarifa.mes);
+    await exigirTrimestreAbierto(idProyecto, tarifa.anio, tarifa.trimestre);
 
     await execute(
       'UPDATE tarifas_kwh SET costo_kwh = ?, motivo = ?, updated_by = ? WHERE id_tarifa = ?',
@@ -345,7 +405,7 @@ tarifasRouter.post(
     const idProyecto = await proyectoDe(req);
     const idTarifa = Number(req.params.rateId);
 
-    const tarifa = await queryOne<{ estado: string; anio: number; mes: number; costo_kwh: number }>(
+    const tarifa = await queryOne<{ estado: string; anio: number; trimestre: number; costo_kwh: number }>(
       'SELECT * FROM tarifas_kwh WHERE id_tarifa = ? AND id_proyecto = ?',
       [idTarifa, idProyecto],
     );
@@ -354,7 +414,7 @@ tarifasRouter.post(
     if (tarifa.estado === 'ANULADA') {
       throw errores.reglaNegocio('Una tarifa anulada no puede aprobarse. Registre una nueva.');
     }
-    await exigirMesAbierto(idProyecto, tarifa.anio, tarifa.mes);
+    await exigirTrimestreAbierto(idProyecto, tarifa.anio, tarifa.trimestre);
 
     const resultado = await withTransaction(async (conn) => {
       await execute(
@@ -364,8 +424,8 @@ tarifasRouter.post(
         [req.usuario!.id_usuario, req.usuario!.id_usuario, idTarifa],
         conn,
       );
-      // Solo se valorizan los registros PENDIENTES de ese proyecto y mes.
-      return recalcularPendientes(idProyecto, tarifa.anio, tarifa.mes, conn);
+      // Solo se valorizan los registros PENDIENTES de ese proyecto y trimestre.
+      return recalcularPendientes(idProyecto, tarifa.anio, tarifa.trimestre, conn);
     });
 
     await auditarDesdeRequest(req, {
@@ -377,7 +437,10 @@ tarifasRouter.post(
 
     ok(res, {
       valorizacion: resultado,
-      mensaje: `Tarifa aprobada. Se valorizaron ${resultado.registros} registro(s) pendientes por Q ${resultado.valor.toFixed(2)}.`,
+      etiqueta: etiquetaTrimestre(tarifa.anio, tarifa.trimestre),
+      mensaje:
+        `Tarifa del ${etiquetaTrimestre(tarifa.anio, tarifa.trimestre)} aprobada. ` +
+        `Se valorizaron ${resultado.registros} registro(s) pendientes por Q ${resultado.valor.toFixed(2)}.`,
     });
   }),
 );
@@ -403,11 +466,12 @@ tarifasRouter.post(
     const impacto = await analizarImpacto(idTarifa, costo_kwh);
     ok(res, {
       ...impacto,
-      advertencia: impacto.mesCerrado
-        ? 'El periodo esta CERRADO. Debe reabrirse con motivo antes de aplicar cualquier correccion.'
-        : impacto.registrosAfectados > 0
-          ? 'Esta correccion modificara valores historicos ya calculados. Revise el impacto antes de confirmar.'
-          : 'No existen registros valorizados con esta tarifa; la correccion no altera historicos.',
+      advertencia:
+        impacto.mesesCerrados.length > 0
+          ? `El trimestre tiene ${impacto.mesesCerrados.length} mes(es) CERRADO(s). Deben reabrirse con motivo antes de aplicar la correccion.`
+          : impacto.registrosAfectados > 0
+            ? `Esta correccion modificara ${impacto.registrosAfectados} registro(s) historicos de los tres meses del trimestre. Revise el impacto antes de confirmar.`
+            : 'No existen registros valorizados con esta tarifa; la correccion no altera historicos.',
     });
   }),
 );
@@ -424,7 +488,7 @@ tarifasRouter.post(
     const idTarifa = Number(req.params.rateId);
     const datos = req.body as z.infer<typeof esquemaRecalculo>;
 
-    const tarifa = await queryOne<{ estado: string; anio: number; mes: number; costo_kwh: number }>(
+    const tarifa = await queryOne<{ estado: string; anio: number; trimestre: number; costo_kwh: number }>(
       'SELECT * FROM tarifas_kwh WHERE id_tarifa = ? AND id_proyecto = ?',
       [idTarifa, idProyecto],
     );
@@ -432,9 +496,13 @@ tarifasRouter.post(
     if (tarifa.estado !== 'APROBADA') {
       throw errores.reglaNegocio('Solo se recalculan tarifas aprobadas. Edite el borrador directamente.');
     }
-    if (await mesEstaCerrado(idProyecto, tarifa.anio, tarifa.mes)) {
+
+    const cerrados = await mesesCerradosDelTrimestre(idProyecto, tarifa.anio, tarifa.trimestre);
+    if (cerrados.length > 0) {
       throw errores.reglaNegocio(
-        `El periodo ${String(tarifa.mes).padStart(2, '0')}/${tarifa.anio} esta cerrado. Solicite su reapertura antes de corregir la tarifa.`,
+        `El ${etiquetaTrimestre(tarifa.anio, tarifa.trimestre)} tiene meses cerrados ` +
+          `(${cerrados.map((m) => MESES_ES[m - 1]).join(', ')}). Solicite su reapertura antes de corregir la tarifa.`,
+        { mesesCerrados: cerrados },
       );
     }
 
@@ -460,7 +528,10 @@ tarifasRouter.post(
 
     ok(res, {
       ...resultado,
-      mensaje: `Tarifa corregida. Se recalcularon ${resultado.registros} registro(s): Q ${resultado.valorAnterior.toFixed(2)} -> Q ${resultado.valorNuevo.toFixed(2)}.`,
+      etiqueta: etiquetaTrimestre(tarifa.anio, tarifa.trimestre),
+      mensaje:
+        `Tarifa del ${etiquetaTrimestre(tarifa.anio, tarifa.trimestre)} corregida. ` +
+        `Se recalcularon ${resultado.registros} registro(s): Q ${resultado.valorAnterior.toFixed(2)} -> Q ${resultado.valorNuevo.toFixed(2)}.`,
     });
   }),
 );
@@ -477,13 +548,13 @@ tarifasRouter.post(
     const idTarifa = Number(req.params.rateId);
     const { motivo } = req.body as { motivo: string };
 
-    const tarifa = await queryOne<{ estado: string; anio: number; mes: number }>(
+    const tarifa = await queryOne<{ estado: string; anio: number; trimestre: number }>(
       'SELECT * FROM tarifas_kwh WHERE id_tarifa = ? AND id_proyecto = ?',
       [idTarifa, idProyecto],
     );
     if (!tarifa) throw errores.noEncontrado('la tarifa indicada');
     if (tarifa.estado === 'ANULADA') throw errores.conflicto('La tarifa ya estaba anulada.');
-    await exigirMesAbierto(idProyecto, tarifa.anio, tarifa.mes);
+    await exigirTrimestreAbierto(idProyecto, tarifa.anio, tarifa.trimestre);
 
     const usados = await queryOne<{ total: number }>(
       'SELECT COUNT(*) AS total FROM produccion WHERE id_tarifa = ? AND activo = 1',
@@ -526,6 +597,9 @@ tarifasRouter.post(
 
 // ---------------------------------------------------------------------------
 // Cierre y reapertura de periodos mensuales
+//
+// El cierre sigue siendo MENSUAL: la produccion y la proyeccion son mensuales
+// y solo la tarifa cambio de periodicidad.
 // ---------------------------------------------------------------------------
 tarifasRouter.post(
   '/close',
@@ -543,7 +617,8 @@ tarifasRouter.post(
     );
     if ((pendientes?.total ?? 0) > 0) {
       throw errores.reglaNegocio(
-        `No se puede cerrar ${MESES_ES[mes - 1]} ${anio}: hay ${pendientes?.total} registro(s) sin tarifa aprobada.`,
+        `No se puede cerrar ${MESES_ES[mes - 1]} ${anio}: hay ${pendientes?.total} registro(s) ` +
+          `sin tarifa aprobada. Registre la tarifa del ${etiquetaTrimestre(anio, Math.ceil(mes / 3))}.`,
       );
     }
 
@@ -599,3 +674,6 @@ tarifasRouter.post(
     ok(res, { mensaje: `Periodo ${MESES_ES[mes - 1]} ${anio} reabierto. Quedo registrado el motivo.` });
   }),
 );
+
+// Se exporta para que el modulo de proyectos pueda reutilizar la validacion.
+export { proyectoDe as proyectoDeRutaTarifas, exigirMesAbierto, trimestreSiguiente, nombreMesesTrimestre };

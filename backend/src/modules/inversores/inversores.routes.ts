@@ -26,6 +26,11 @@ const ESTADOS = ['ACTIVO', 'INACTIVO', 'MANTENIMIENTO'] as const;
 
 const esquemaInversor = z.object({
   id_proyecto: z.coerce.number().int().positive('Seleccione el proyecto al que pertenece el inversor.'),
+  // Jerarquia PROYECTO -> GRUPO -> INVERSOR: todo inversor pertenece a un grupo.
+  id_grupo: z.coerce
+    .number({ invalid_type_error: 'Seleccione el grupo al que pertenece el inversor.' })
+    .int()
+    .positive('Seleccione el grupo al que pertenece el inversor.'),
   marca: z.string().trim().min(2, 'Indique la marca del inversor.').max(60),
   modelo: z.string().trim().min(1, 'Indique el modelo del inversor.').max(80),
   tipo_conexion: z.enum(CONEXIONES).default('MANUAL'),
@@ -52,6 +57,7 @@ inversoresRouter.get(
   validarConsulta(
     esquemaPaginacion.extend({
       id_proyecto: z.coerce.number().int().positive().optional(),
+      id_grupo: z.coerce.number().int().positive().optional(),
       id_cliente: z.coerce.number().int().positive().optional(),
       tipo_conexion: z.enum(CONEXIONES).optional(),
       estado: z.enum(ESTADOS).optional(),
@@ -62,6 +68,7 @@ inversoresRouter.get(
     const p = consulta<
       z.infer<typeof esquemaPaginacion> & {
         id_proyecto?: number;
+        id_grupo?: number;
         id_cliente?: number;
         tipo_conexion?: string;
         estado?: string;
@@ -79,6 +86,10 @@ inversoresRouter.get(
     if (p.id_proyecto) {
       condiciones.push('i.id_proyecto = ?');
       params.push(p.id_proyecto);
+    }
+    if (p.id_grupo) {
+      condiciones.push('i.id_grupo = ?');
+      params.push(p.id_grupo);
     }
     if (p.id_cliente) {
       condiciones.push('pr.id_cliente = ?');
@@ -100,6 +111,7 @@ inversoresRouter.get(
     const donde = condiciones.join(' AND ');
     const filas = await query(
       `SELECT i.*, pr.nombre AS proyecto, pr.id_cliente, c.nombre AS cliente,
+              g.nombre AS grupo, g.tiene_banco_baterias,
               (SELECT COALESCE(SUM(p.kwh), 0) FROM produccion p
                 WHERE p.id_inversor = i.id_inversor AND p.activo = 1) AS kwh_total,
               (SELECT MAX(p.fecha) FROM produccion p
@@ -107,6 +119,7 @@ inversoresRouter.get(
          FROM inversores i
          JOIN proyectos pr ON pr.id_proyecto = i.id_proyecto
          JOIN clientes c ON c.id_cliente = pr.id_cliente
+         JOIN grupos g ON g.id_grupo = i.id_grupo
         WHERE ${donde}
         ORDER BY ${columnaOrden(p.orden, COLUMNAS, 'pr.nombre')} ${p.direccion === 'desc' ? 'DESC' : 'ASC'}, i.marca
         LIMIT ? OFFSET ?`,
@@ -115,7 +128,8 @@ inversoresRouter.get(
 
     const total = await queryOne<{ total: number }>(
       `SELECT COUNT(*) AS total FROM inversores i
-         JOIN proyectos pr ON pr.id_proyecto = i.id_proyecto WHERE ${donde}`,
+         JOIN proyectos pr ON pr.id_proyecto = i.id_proyecto
+         JOIN grupos g ON g.id_grupo = i.id_grupo WHERE ${donde}`,
       params,
     );
 
@@ -130,10 +144,12 @@ inversoresRouter.get(
     const id = Number(req.params.id);
     const inversor = await queryOne(
       `SELECT i.*, pr.nombre AS proyecto, pr.id_cliente, c.nombre AS cliente,
+              g.nombre AS grupo, g.tiene_banco_baterias, g.capacidad_baterias_kwh,
               a.marca AS api_marca, a.nombre AS api_nombre, a.modo AS api_modo, a.estado AS api_estado
          FROM inversores i
          JOIN proyectos pr ON pr.id_proyecto = i.id_proyecto
          JOIN clientes c ON c.id_cliente = pr.id_cliente
+         JOIN grupos g ON g.id_grupo = i.id_grupo
          LEFT JOIN apis_fabricante a ON a.id_api = i.id_api
         WHERE i.id_inversor = ?`,
       [id],
@@ -183,6 +199,19 @@ inversoresRouter.post(
       throw errores.reglaNegocio('No es posible agregar inversores a un proyecto desactivado.');
     }
 
+    // El grupo debe existir, estar activo y pertenecer al mismo proyecto.
+    const grupo = await queryOne<{ id_proyecto: number; activo: number; nombre: string }>(
+      'SELECT id_proyecto, activo, nombre FROM grupos WHERE id_grupo = ?',
+      [datos.id_grupo],
+    );
+    if (!grupo) throw errores.validacion('El grupo indicado no existe.');
+    if (grupo.id_proyecto !== datos.id_proyecto) {
+      throw errores.validacion('El grupo seleccionado no pertenece al proyecto indicado.');
+    }
+    if (!grupo.activo) {
+      throw errores.reglaNegocio('No es posible agregar inversores a un grupo desactivado.');
+    }
+
     if (datos.tipo_conexion === 'HUAWEI_API' && !datos.serial_externo) {
       throw errores.validacion(
         'Un inversor con conexion HUAWEI_API requiere el identificador externo (serial o deviceDn) para poder sincronizarse.',
@@ -201,11 +230,12 @@ inversoresRouter.post(
 
     const resultado = await execute(
       `INSERT INTO inversores
-         (id_proyecto, marca, modelo, tipo_conexion, serial_externo, estacion_externa,
+         (id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo, estacion_externa,
           capacidad_kwp, estado, id_api, observaciones, activo, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         datos.id_proyecto,
+        datos.id_grupo,
         datos.marca,
         datos.modelo,
         datos.tipo_conexion,
@@ -255,6 +285,7 @@ inversoresRouter.put(
 
     const mapa: Record<string, unknown> = {
       id_proyecto: datos.id_proyecto,
+      id_grupo: datos.id_grupo,
       marca: datos.marca,
       modelo: datos.modelo,
       tipo_conexion: datos.tipo_conexion,

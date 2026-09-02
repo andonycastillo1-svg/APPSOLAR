@@ -87,6 +87,7 @@ export async function crearUsuario(
   email: string,
   rol: 'ADMINISTRATIVO' | 'OPERATIVO' | 'GERENCIAL',
   permisosExtra: string[] = [],
+  permisosRevocados: string[] = [],
 ): Promise<number> {
   const filaRol = await queryOne<{ id_rol: number }>('SELECT id_rol FROM roles WHERE codigo = ?', [rol]);
   const resultado = await execute(
@@ -95,16 +96,19 @@ export async function crearUsuario(
     [`Usuario ${rol}`, email, await hashPassword(PASSWORD_PRUEBAS), filaRol!.id_rol],
   );
 
-  for (const codigo of permisosExtra) {
-    const permiso = await queryOne<{ id_permiso: number }>(
-      'SELECT id_permiso FROM permisos WHERE codigo = ?',
-      [codigo],
-    );
-    if (permiso) {
-      await execute(
-        'INSERT INTO usuario_permisos (id_usuario, id_permiso, otorgado) VALUES (?, ?, 1)',
-        [resultado.insertId, permiso.id_permiso],
+  // Los permisos individuales se otorgan (1) o se revocan (0) sobre el rol.
+  for (const [lista, otorgado] of [[permisosExtra, 1], [permisosRevocados, 0]] as const) {
+    for (const codigo of lista) {
+      const permiso = await queryOne<{ id_permiso: number }>(
+        'SELECT id_permiso FROM permisos WHERE codigo = ?',
+        [codigo],
       );
+      if (permiso) {
+        await execute(
+          'INSERT INTO usuario_permisos (id_usuario, id_permiso, otorgado) VALUES (?, ?, ?)',
+          [resultado.insertId, permiso.id_permiso, otorgado],
+        );
+      }
     }
   }
 
@@ -118,6 +122,7 @@ export async function crearUsuario(
 export interface DatosBase {
   idCliente: number;
   idProyecto: number;
+  idGrupo: number;
   idInversor: number;
   idInversorHuawei: number;
   idApi: number;
@@ -141,37 +146,47 @@ export async function crearDatosBase(sufijo = ''): Promise<DatosBase> {
     [`Huawei Pruebas${sufijo}`],
   );
 
+  // Jerarquia PROYECTO -> GRUPO -> INVERSOR: todo inversor necesita su grupo.
+  const grupo = await execute(
+    `INSERT INTO grupos (id_proyecto, nombre, cantidad_inversores_declarada,
+                         tiene_banco_baterias, capacidad_kwp, activo)
+     VALUES (?, ?, 2, 0, 500, 1)`,
+    [proyecto.insertId, `Grupo Pruebas${sufijo}`],
+  );
+
   const inversor = await execute(
-    `INSERT INTO inversores (id_proyecto, marca, modelo, tipo_conexion, serial_externo, capacidad_kwp, estado, activo)
-     VALUES (?, 'Fronius', 'Symo 24', 'MANUAL', ?, 250, 'ACTIVO', 1)`,
-    [proyecto.insertId, `SN-MAN${sufijo || '0'}`],
+    `INSERT INTO inversores (id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo, capacidad_kwp, estado, activo)
+     VALUES (?, ?, 'Fronius', 'Symo 24', 'MANUAL', ?, 250, 'ACTIVO', 1)`,
+    [proyecto.insertId, grupo.insertId, `SN-MAN${sufijo || '0'}`],
   );
 
   const inversorHuawei = await execute(
-    `INSERT INTO inversores (id_proyecto, marca, modelo, tipo_conexion, serial_externo, estacion_externa, capacidad_kwp, estado, id_api, activo)
-     VALUES (?, 'Huawei', 'SUN2000', 'HUAWEI_API', ?, 'NE=PRUEBA', 250, 'ACTIVO', ?, 1)`,
-    [proyecto.insertId, `SN-HW${sufijo || '0'}`, api.insertId],
+    `INSERT INTO inversores (id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo, estacion_externa, capacidad_kwp, estado, id_api, activo)
+     VALUES (?, ?, 'Huawei', 'SUN2000', 'HUAWEI_API', ?, 'NE=PRUEBA', 250, 'ACTIVO', ?, 1)`,
+    [proyecto.insertId, grupo.insertId, `SN-HW${sufijo || '0'}`, api.insertId],
   );
 
   return {
     idCliente: cliente.insertId,
     idProyecto: proyecto.insertId,
+    idGrupo: grupo.insertId,
     idInversor: inversor.insertId,
     idInversorHuawei: inversorHuawei.insertId,
     idApi: api.insertId,
   };
 }
 
+/** La tarifa tiene vigencia TRIMESTRAL (trimestres calendario). */
 export async function crearTarifaAprobada(
   idProyecto: number,
   anio: number,
-  mes: number,
+  trimestre: number,
   costo: number,
 ): Promise<number> {
   const resultado = await execute(
-    `INSERT INTO tarifas_kwh (id_proyecto, anio, mes, costo_kwh, moneda, estado, fecha_aprobacion)
+    `INSERT INTO tarifas_kwh (id_proyecto, anio, trimestre, costo_kwh, moneda, estado, fecha_aprobacion)
      VALUES (?, ?, ?, ?, 'GTQ', 'APROBADA', NOW())`,
-    [idProyecto, anio, mes, costo],
+    [idProyecto, anio, trimestre, costo],
   );
   return resultado.insertId;
 }
@@ -189,6 +204,7 @@ export async function limpiarDatos(): Promise<void> {
     'proyecciones_kwh',
     'cierres_mensuales',
     'inversores',
+    'grupos',
     'proyectos',
     'clientes',
     'apis_fabricante',
@@ -219,9 +235,11 @@ export async function filasProduccion(idProyecto: number) {
     secuencia: number;
     anio: number;
     mes: number;
+    origen: string;
+    comentarios: string | null;
   }>(
     `SELECT id_produccion, kwh, valor_q, costo_kwh_aplicado, estado_valorizacion,
-            nivel_detalle, granularidad, secuencia, anio, mes
+            nivel_detalle, granularidad, secuencia, anio, mes, origen, comentarios
        FROM produccion WHERE id_proyecto = ? AND activo = 1 ORDER BY fecha, secuencia`,
     [idProyecto],
   );
@@ -297,4 +315,53 @@ export async function levantarPythonSimulado(
         servidor.close(() => resolver());
       }),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Alta de proyecto
+// ---------------------------------------------------------------------------
+
+/**
+ * Cuerpo valido para POST /api/projects.
+ *
+ * La proyeccion anual repartida en 12 meses es OBLIGATORIA desde el alta,
+ * asi que todas las pruebas que crean proyectos deben enviarla.
+ */
+export function cuerpoAltaProyecto(
+  idCliente: number,
+  nombre: string,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    id_cliente: idCliente,
+    nombre,
+    tipo_proyecto: 'PPA',
+    proyeccion: {
+      anio: 2026,
+      aprobarInmediato: true,
+      meses: Array.from({ length: 12 }, (_, i) => ({ mes: i + 1, proyeccion_kwh: 1000 })),
+    },
+    ...extra,
+  };
+}
+
+/** Crea un grupo adicional dentro de un proyecto ya existente. */
+export async function crearGrupo(
+  idProyecto: number,
+  nombre: string,
+  opciones: { inversoresDeclarados?: number; baterias?: number | null } = {},
+): Promise<number> {
+  const resultado = await execute(
+    `INSERT INTO grupos (id_proyecto, nombre, cantidad_inversores_declarada,
+                         tiene_banco_baterias, capacidad_baterias_kwh, activo)
+     VALUES (?, ?, ?, ?, ?, 1)`,
+    [
+      idProyecto,
+      nombre,
+      opciones.inversoresDeclarados ?? null,
+      opciones.baterias ? 1 : 0,
+      opciones.baterias ?? null,
+    ],
+  );
+  return resultado.insertId;
 }

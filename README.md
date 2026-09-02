@@ -145,16 +145,18 @@ Creados solo cuando `SEED_DEMO_DATA=true`. Todos usan el valor de `DEMO_USER_PAS
 |---|---|---|
 | `demo.admin@retse.com.gt` | Administrativo | Todo: usuarios, catálogos, aprobación de tarifas, auditoría |
 | `demo.operativo@retse.com.gt` | Operativo | Inversores, carga de históricos, sincronización |
-| `demo.coordinador@retse.com.gt` | Operativo **+ `tarifas.gestionar`** | Registrar tarifas mensuales (coordinador) |
+| `demo.coordinador@retse.com.gt` | Operativo **+ `tarifas.gestionar`** | Registrar tarifas trimestrales (coordinador) |
 | `demo.gerencia@retse.com.gt` | Gerencial | Solo lectura, comparaciones y reportes |
 
 El administrador inicial real es el definido en `BOOTSTRAP_ADMIN_EMAIL`.
 
 **Los datos sembrados incluyen deliberadamente** dos clientes, tres proyectos (PPA, EPC y
-autoconsumo), cinco inversores (manuales y Huawei), tarifas que cambian mes a mes con
-**un mes sin tarifa** para demostrar la alerta de valorización pendiente, proyecciones de
-doce meses, producción de dos años, importaciones exitosas y con errores, y ejecuciones
-Huawei simuladas (una correcta y una fallida por IP no autorizada).
+autoconsumo), cuatro **grupos de inversores** (uno de ellos con banco de baterías), cinco
+inversores (manuales y Huawei), tarifas **trimestrales** que cambian de un trimestre a otro
+con **el trimestre en curso sin tarifa** para demostrar el aviso de actualización trimestral,
+proyecciones de doce meses, producción de dos años, una **carga manual de una semana
+completa** en el grupo que perdió la conexión con el fabricante, importaciones exitosas y con
+errores, y ejecuciones Huawei simuladas (una correcta y una fallida por IP no autorizada).
 
 ---
 
@@ -204,7 +206,9 @@ migraciones de producción. No se simula la base de datos.
 ```
 tests/autenticacion.test.ts   Sesión, bloqueo, rotación de tokens, CSRF, contraseñas
 tests/rbac.test.ts            Matriz de permisos endpoint por endpoint y por rol
-tests/tarifas.test.ts         Valorización, meses sin tarifa, impacto, recálculo, cierre
+tests/tarifas.test.ts         Valorización trimestral, impacto, recálculo, cierre y aviso
+tests/grupos.test.ts          Jerarquía proyecto/grupo/inversor, proyección del alta y
+                              carga manual de rangos cuando falla la conexión
 tests/importaciones.test.ts   ETL: formatos, validaciones, decisiones, duplicados, rollback
 tests/huawei.test.ts          Sincronización, idempotencia y errores diferenciados
 tests/analisis.test.ts        Proyecciones, agregaciones, comparaciones y reportes
@@ -212,28 +216,66 @@ tests/seguridad.test.ts       Inyección, archivos, secretos, cabeceras y CORS
 tests/e2e/recorrido.test.ts   Recorrido completo exigido en el alcance
 ```
 
-Resultado de la última ejecución: **142 pruebas, 8 archivos, todas correctas.**
+Resultado de la última ejecución: **168 pruebas, 9 archivos, todas correctas.**
 
 ---
 
 ## Reglas de negocio clave
 
-**Valorización monetaria**
+**Jerarquía del negocio**
 
-Cada registro se valoriza con la tarifa **aprobada** del mes de su propia fecha:
-`valor_q = kwh × costo_kwh`. En rangos multi-mes se valoriza registro por registro y luego
-se suma; nunca se multiplica el total del rango por una sola tarifa.
+```
+CLIENTE ─► PROYECTO ─► GRUPO ─► INVERSOR
+```
 
-Si un mes no tiene tarifa aprobada, **los kWh se conservan intactos** y el registro queda
-como `PENDIENTE_DE_TARIFA`. No se usa cero ni la tarifa del mes anterior. Al aprobar la
-tarifa faltante, el sistema recalcula únicamente los registros pendientes de ese mes.
+Un proyecto se divide en **grupos** y cada grupo agrupa varios inversores con sus seriales.
+Cada grupo declara cuántos inversores debería tener y si cuenta con **banco de baterías**;
+el sistema avisa cuando lo declarado no coincide con lo registrado, sin bloquear la
+operación. Todo inversor pertenece a un grupo.
 
-**Prevención del doble conteo**
+**Proyección pactada desde el alta**
+
+La **proyección anual repartida mes a mes es obligatoria al crear el proyecto**. Es el
+compromiso pactado desde el inicio y la base contra la que después se compara la generación
+real para saber si la planta cumple. Proyecto, proyección y grupos se crean en una sola
+transacción.
+
+**Valorización monetaria (tarifa TRIMESTRAL)**
+
+El costo del kWh se pacta **por trimestre calendario**: los tres meses de un trimestre
+comparten siempre la misma tarifa. Cada registro se valoriza con la tarifa **aprobada** del
+trimestre de su propia fecha: `valor_q = kwh × costo_kwh`. En rangos multi-trimestre se
+valoriza registro por registro y luego se suma; nunca se multiplica el total del rango por
+una sola tarifa.
+
+Si un trimestre no tiene tarifa aprobada, **los kWh se conservan intactos** y el registro
+queda como `PENDIENTE_DE_TARIFA`. No se usa cero ni la tarifa del trimestre anterior. Al
+aprobar la tarifa faltante, el sistema recalcula únicamente los registros pendientes de ese
+trimestre.
+
+El sistema **avisa** cuando el trimestre en curso no tiene tarifa aprobada, y con
+anticipación configurable (`tarifa.dias_aviso_trimestre`, por omisión 15 días) cuando el
+siguiente tampoco la tiene. El aviso aparece en el tablero y en la pantalla de tarifas.
+
+**Datos que el fabricante no entregó**
+
+Si un grupo de inversores pierde la conexión durante un rango de fechas, el operador puede
+**cargar esa energía manualmente** para que el histórico quede completo. El sistema muestra
+los días faltantes de cada grupo, reparte la cifra capturada por día y guarda el resultado
+como consolidado del grupo, con motivo obligatorio y auditoría. Repetir la carga no duplica
+nada, y mezclar un relleno diario con un cierre mensual del mismo mes se **bloquea** salvo
+confirmación expresa.
+
+**Prevención del doble conteo (tres niveles)**
 
 | Situación | Prevalece | Se ignora en los totales |
 |---|---|---|
-| Detalle por inversor + consolidado de proyecto en el mismo mes | `POR_INVERSOR` | El consolidado |
+| Detalle por inversor + consolidado de grupo en la misma fecha | `POR_INVERSOR` | El consolidado del grupo |
+| Datos con grupo + consolidado de proyecto en la misma fecha | El nivel con grupo | El consolidado de proyecto |
 | Lecturas diarias + cierre mensual del mismo inversor y mes | `DIARIA` | El registro mensual |
+
+La resolución es **por grupo y por fecha**, nunca por mes: así una carga manual de un día
+concreto nunca se descarta porque ese mismo mes tenga detalle por inversor en otros días.
 
 El sistema informa siempre estos casos; nunca los resuelve en silencio.
 
@@ -245,8 +287,9 @@ No son duplicados automáticos. El asistente exige decidir: **SUMAR**, **COMPONE
 **Correcciones**
 
 Corregir una tarifa ya utilizada exige análisis de impacto, motivo, confirmación explícita
-y el permiso `tarifas.recalcular`. Se conserva la auditoría antes/después. Un mes cerrado
-no admite cambios sin reapertura autorizada con motivo.
+y el permiso `tarifas.recalcular`; el recálculo alcanza a los tres meses del trimestre. Se
+conserva la auditoría antes/después. El cierre contable sigue siendo **mensual**: un mes
+cerrado no admite cambios sin reapertura autorizada con motivo.
 
 ---
 

@@ -36,14 +36,14 @@ Leyenda: **✔** incluido en el rol · **✖** no incluido · **◐** se otorga 
 | `proyectos.ver` | Consultar proyectos solares | ✔ | ✔ | ✔ |
 | `proyectos.gestionar` | Crear, editar y desactivar proyectos | ✔ | ✖ | ✖ |
 | `inversores.ver` | Consultar inversores | ✔ | ✔ | ✔ |
-| `inversores.gestionar` | Crear, editar y desactivar inversores | ✔ | ✔ | ✖ |
+| `inversores.gestionar` | Crear, editar y desactivar inversores **y sus grupos** | ✔ | ✔ | ✖ |
 | `produccion.ver` | Consultar producción energética | ✔ | ✔ | ✔ |
 | `produccion.registrar` | Registrar producción manualmente | ✔ | ✔ | ✖ |
 | `produccion.corregir` | Corregir registros con motivo y auditoría | ✔ | ✖ | ✖ |
 | `importaciones.ver` | Consultar el historial de importaciones | ✔ | ✔ | ✔ |
 | `importaciones.cargar` | Cargar, previsualizar y confirmar archivos | ✔ | ✔ | ✖ |
-| `tarifas.ver` | Consultar tarifas mensuales | ✔ | ✔ | ✔ |
-| `tarifas.gestionar` | Registrar y editar tarifas en BORRADOR | ✔ | ◐ | ✖ |
+| `tarifas.ver` | Consultar tarifas **trimestrales** y su aviso de actualización | ✔ | ✔ | ✔ |
+| `tarifas.gestionar` | Registrar y editar tarifas trimestrales en BORRADOR | ✔ | ◐ | ✖ |
 | `tarifas.aprobar` | Aprobar o anular tarifas | ✔ | ✖ | ✖ |
 | `tarifas.recalcular` | Corregir tarifas usadas y recalcular | ✔ | ✖ | ✖ |
 | `tarifas.cerrar_mes` | Cerrar un periodo mensual | ✔ | ✖ | ✖ |

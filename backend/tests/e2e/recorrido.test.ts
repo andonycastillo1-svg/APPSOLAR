@@ -36,6 +36,7 @@ describe('Recorrido completo de punta a punta', () => {
   let idProyectoPpa = 0;
   let idProyectoEpc = 0;
   let idInversorHuawei = 0;
+  let idGrupoPpa = 0;
   let idApi = 0;
   let nombrePlantaEpc = '';
 
@@ -112,6 +113,8 @@ describe('Recorrido completo de punta a punta', () => {
       .expect(201);
     idCliente = cliente.body.datos.id_cliente;
 
+    // El alta exige la proyeccion anual repartida en 12 meses y admite
+    // declarar los grupos de inversores en el mismo acto.
     const ppa = await comoUsuario(admin)
       .post('/api/projects')
       .send({
@@ -120,9 +123,25 @@ describe('Recorrido completo de punta a punta', () => {
         tipo_proyecto: 'PPA',
         capacidad_kwp: 500,
         ubicacion: 'Escuintla',
+        proyeccion: {
+          anio: 2026,
+          aprobarInmediato: true,
+          meses: Array.from({ length: 12 }, (_, i) => ({ mes: i + 1, proyeccion_kwh: 12000 })),
+        },
+        grupos: [
+          {
+            nombre: 'Grupo Recorrido A',
+            cantidad_inversores_declarada: 1,
+            tiene_banco_baterias: true,
+            capacidad_baterias_kwh: 200,
+            capacidad_kwp: 500,
+          },
+        ],
       })
       .expect(201);
     idProyectoPpa = ppa.body.datos.id_proyecto;
+    idGrupoPpa = ppa.body.datos.grupos[0];
+    expect(ppa.body.datos.proyeccion.total_kwh).toBe(144000);
 
     const epc = await comoUsuario(admin)
       .post('/api/projects')
@@ -131,15 +150,34 @@ describe('Recorrido completo de punta a punta', () => {
         nombre: 'Planta Recorrido EPC',
         tipo_proyecto: 'EPC',
         capacidad_kwp: 300,
+        proyeccion: {
+          anio: 2025,
+          aprobarInmediato: true,
+          meses: Array.from({ length: 12 }, (_, i) => ({ mes: i + 1, proyeccion_kwh: 9000 })),
+        },
       })
       .expect(201);
     idProyectoEpc = epc.body.datos.id_proyecto;
     nombrePlantaEpc = 'Planta Recorrido EPC';
 
-    // Un proyecto no puede existir sin cliente.
+    // Un proyecto no puede existir sin cliente...
     await comoUsuario(admin)
       .post('/api/projects')
-      .send({ id_cliente: 999999, nombre: 'Proyecto sin cliente', tipo_proyecto: 'PPA' })
+      .send({
+        id_cliente: 999999,
+        nombre: 'Proyecto sin cliente',
+        tipo_proyecto: 'PPA',
+        proyeccion: {
+          anio: 2026,
+          meses: Array.from({ length: 12 }, (_, i) => ({ mes: i + 1, proyeccion_kwh: 100 })),
+        },
+      })
+      .expect(422);
+
+    // ...ni sin su proyeccion anual completa.
+    await comoUsuario(admin)
+      .post('/api/projects')
+      .send({ id_cliente: idCliente, nombre: 'Proyecto sin proyeccion', tipo_proyecto: 'PPA' })
       .expect(422);
 
     // La integracion Huawei del entorno de demostracion.
@@ -162,6 +200,7 @@ describe('Recorrido completo de punta a punta', () => {
       .post('/api/inverters')
       .send({
         id_proyecto: idProyectoPpa,
+        id_grupo: idGrupoPpa,
         marca: 'Huawei',
         modelo: 'SUN2000-100KTL',
         tipo_conexion: 'HUAWEI_API',
@@ -176,11 +215,25 @@ describe('Recorrido completo de punta a punta', () => {
     // Un inversor Huawei sin identificador externo se rechaza.
     await comoUsuario(operativo)
       .post('/api/inverters')
-      .send({ id_proyecto: idProyectoPpa, marca: 'Huawei', modelo: 'X', tipo_conexion: 'HUAWEI_API' })
+      .send({
+        id_proyecto: idProyectoPpa,
+        id_grupo: idGrupoPpa,
+        marca: 'Huawei',
+        modelo: 'X',
+        tipo_conexion: 'HUAWEI_API',
+      })
+      .expect(422);
+
+    // Y ningun inversor puede existir fuera de un grupo.
+    await comoUsuario(operativo)
+      .post('/api/inverters')
+      .send({ id_proyecto: idProyectoPpa, marca: 'SMA', modelo: 'Sin grupo' })
       .expect(422);
   });
 
   it('3. registra y aprueba la proyeccion mensual del proyecto PPA', async () => {
+    // La proyeccion de 2026 ya se capturo en el alta del proyecto; aqui se
+    // agrega la del anio anterior para poder comparar entre anios.
     await comoUsuario(admin)
       .post(`/api/projects/${idProyectoPpa}/projections`)
       .send({
@@ -190,43 +243,33 @@ describe('Recorrido completo de punta a punta', () => {
       })
       .expect(201);
 
-    await comoUsuario(admin)
-      .post(`/api/projects/${idProyectoPpa}/projections`)
-      .send({
-        anio: 2026,
-        aprobarInmediato: true,
-        meses: [
-          { mes: 1, proyeccion_kwh: 12000 },
-          { mes: 2, proyeccion_kwh: 12000 },
-        ],
-      })
-      .expect(201);
-
     const calendario = await comoUsuario(gerencial)
       .get(`/api/projects/${idProyectoPpa}/projections?anio=2026`)
       .expect(200);
-    expect(Number(calendario.body.datos.totales.proyeccion_kwh)).toBe(24000);
+    expect(Number(calendario.body.datos.totales.proyeccion_kwh)).toBe(144000);
   });
 
   it('4. el coordinador registra las tarifas y el administrador las aprueba', async () => {
     // El operativo comun no puede registrar tarifas.
     await comoUsuario(operativo)
       .post(`/api/projects/${idProyectoPpa}/rates`)
-      .send({ anio: 2026, mes: 1, costo_kwh: 1.1 })
+      .send({ anio: 2026, trimestre: 1, costo_kwh: 1.1 })
       .expect(403);
 
-    const tarifas: Array<{ proyecto: number; anio: number; mes: number; costo: number }> = [
-      { proyecto: idProyectoPpa, anio: 2025, mes: 1, costo: 1.0 },
-      { proyecto: idProyectoPpa, anio: 2026, mes: 1, costo: 1.2 },
-      { proyecto: idProyectoPpa, anio: 2026, mes: 2, costo: 1.5 },
-      { proyecto: idProyectoEpc, anio: 2025, mes: 1, costo: 0.9 },
-      { proyecto: idProyectoEpc, anio: 2025, mes: 2, costo: 0.95 },
+    // Una tarifa por trimestre calendario: los tres meses de un trimestre
+    // comparten siempre el mismo costo por kWh.
+    const tarifas: Array<{ proyecto: number; anio: number; trimestre: number; costo: number }> = [
+      { proyecto: idProyectoPpa, anio: 2025, trimestre: 1, costo: 1.0 },
+      { proyecto: idProyectoPpa, anio: 2026, trimestre: 1, costo: 1.2 },
+      { proyecto: idProyectoPpa, anio: 2026, trimestre: 2, costo: 1.5 },
+      { proyecto: idProyectoEpc, anio: 2025, trimestre: 1, costo: 0.9 },
+      { proyecto: idProyectoEpc, anio: 2025, trimestre: 2, costo: 0.95 },
     ];
 
     for (const tarifa of tarifas) {
       const creada = await comoUsuario(coordinador)
         .post(`/api/projects/${tarifa.proyecto}/rates`)
-        .send({ anio: tarifa.anio, mes: tarifa.mes, costo_kwh: tarifa.costo })
+        .send({ anio: tarifa.anio, trimestre: tarifa.trimestre, costo_kwh: tarifa.costo })
         .expect(201);
       expect(creada.body.datos.estado).toBe('BORRADOR');
 
@@ -238,16 +281,19 @@ describe('Recorrido completo de punta a punta', () => {
     const calendario = await comoUsuario(coordinador)
       .get(`/api/projects/${idProyectoPpa}/rates?anio=2026`)
       .expect(200);
-    expect(calendario.body.datos.resumen.mesesAprobados).toBe(2);
+    expect(calendario.body.datos.periodicidad).toBe('TRIMESTRAL');
+    expect(calendario.body.datos.resumen.trimestresAprobados).toBe(2);
+    expect(calendario.body.datos.resumen.trimestresSinTarifa).toBe(2);
   });
 
   it('5. el operativo carga el formato historico del Excel con filas del mismo mes', async () => {
+    // Enero cae en el I trimestre (Q 0.90) y abril en el II (Q 0.95).
     const contenido = Buffer.from(
       [
         'Planta,Tipo,Anio,Mes,Generacion,Comentarios',
         `${nombrePlantaEpc},EPC,2025,Enero,8000,Medidor principal`,
         `${nombrePlantaEpc},EPC,2025,Enero,2000,Medidor secundario`,
-        `${nombrePlantaEpc},EPC,2025,Febrero,9500,`,
+        `${nombrePlantaEpc},EPC,2025,Abril,9500,`,
         `${nombrePlantaEpc},EPC,2025,Trecemberre,100,Mes invalido a proposito`,
       ].join('\r\n'),
       'utf8',
@@ -273,15 +319,15 @@ describe('Recorrido completo de punta a punta', () => {
       .expect(200);
 
     // Enero se consolido en un solo registro de 10000 kWh (8000 + 2000)
-    // y febrero se cargo tal cual: no se perdio ni se duplico informacion.
+    // y abril se cargo tal cual: no se perdio ni se duplico informacion.
     expect(confirmacion.body.datos.insertadas).toBe(2);
 
     const resumen = await comoUsuario(operativo)
-      .get(`/api/production/summary?desde=2025-01-01&hasta=2025-02-28&id_proyecto=${idProyectoEpc}`)
+      .get(`/api/production/summary?desde=2025-01-01&hasta=2025-04-30&id_proyecto=${idProyectoEpc}`)
       .expect(200);
 
     expect(Number(resumen.body.datos.kwh)).toBe(19500);
-    // 10000 x 0.90 + 9500 x 0.95 = 9000 + 9025 = 18025
+    // I trimestre 10000 x 0.90 + II trimestre 9500 x 0.95 = 9000 + 9025 = 18025
     expect(Number(resumen.body.datos.valor_q)).toBe(18025);
     expect(resumen.body.datos.coberturaTarifaria.completa).toBe(true);
   });
@@ -292,13 +338,13 @@ describe('Recorrido completo de punta a punta', () => {
       registros: [
         { serial: 'SN-E2E-001', fecha: '2026-01-10', kwh: 400 },
         { serial: 'SN-E2E-001', fecha: '2026-01-11', kwh: 450 },
-        { serial: 'SN-E2E-001', fecha: '2026-02-10', kwh: 380 },
+        { serial: 'SN-E2E-001', fecha: '2026-04-10', kwh: 380 },
       ],
     };
 
     const primera = await comoUsuario(operativo)
       .post('/api/integrations/huawei/sync')
-      .send({ id_api: idApi, desde: '2026-01-10', hasta: '2026-02-10', granularidad: 'DIARIA' })
+      .send({ id_api: idApi, desde: '2026-01-10', hasta: '2026-04-10', granularidad: 'DIARIA' })
       .expect(200);
 
     expect(primera.body.datos.insertadas).toBe(3);
@@ -306,16 +352,16 @@ describe('Recorrido completo de punta a punta', () => {
 
     const segunda = await comoUsuario(operativo)
       .post('/api/integrations/huawei/sync')
-      .send({ id_api: idApi, desde: '2026-01-10', hasta: '2026-02-10', granularidad: 'DIARIA' })
+      .send({ id_api: idApi, desde: '2026-01-10', hasta: '2026-04-10', granularidad: 'DIARIA' })
       .expect(200);
     expect(segunda.body.datos.insertadas).toBe(0);
     expect(segunda.body.datos.actualizadas).toBe(3);
 
     const resumen = await comoUsuario(operativo)
-      .get(`/api/production/summary?desde=2026-01-01&hasta=2026-02-28&id_proyecto=${idProyectoPpa}`)
+      .get(`/api/production/summary?desde=2026-01-01&hasta=2026-04-30&id_proyecto=${idProyectoPpa}`)
       .expect(200);
 
-    // (400 + 450) x 1.2 + 380 x 1.5 = 1020 + 570 = 1590
+    // I trimestre (400 + 450) x 1.2 + II trimestre 380 x 1.5 = 1020 + 570 = 1590
     expect(Number(resumen.body.datos.kwh)).toBe(1230);
     expect(Number(resumen.body.datos.valor_q)).toBe(1590);
   });
@@ -327,11 +373,19 @@ describe('Recorrido completo de punta a punta', () => {
 
     const enero = anual.body.datos.filas[0];
     expect(Number(enero.proyeccion_kwh)).toBe(12000);
+    expect(enero.trimestre).toBe(1);
     expect(Number(enero.generacion_anio_seleccionado)).toBe(850);
     expect(Number(enero.generacion_anio_anterior)).toBe(0);
     expect(Number(enero.cumplimiento_anio_seleccionado)).toBeCloseTo(7.08, 1);
     expect(Number(enero.tarifa_q_kwh)).toBe(1.2);
     expect(Number(enero.valor_producido_q)).toBe(1020);
+
+    // Abril pertenece al II trimestre y se valoriza a Q 1.50.
+    const abril = anual.body.datos.filas[3];
+    expect(abril.trimestre).toBe(2);
+    expect(Number(abril.generacion_anio_seleccionado)).toBe(380);
+    expect(Number(abril.tarifa_q_kwh)).toBe(1.5);
+    expect(Number(abril.valor_producido_q)).toBe(570);
 
     const totales = anual.body.datos.totales;
     expect(Number(totales.generacion_anio_seleccionado)).toBe(1230);
@@ -345,7 +399,7 @@ describe('Recorrido completo de punta a punta', () => {
         tipo: 'RESUMEN_ANUAL',
         nombre: 'Reporte gerencial del recorrido',
         desde: '2026-01-01',
-        hasta: '2026-02-28',
+        hasta: '2026-04-30',
         id_proyecto: idProyectoPpa,
         granularidad: 'MENSUAL',
         anio: 2026,

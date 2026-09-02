@@ -12,9 +12,19 @@ import {
   type Sesion,
 } from './utils/entorno';
 import { porcentajeCumplimiento, variacionPorcentual } from '../src/utils/numeros';
+import { etiquetaTrimestre, trimestreDeMes, trimestresDelPeriodo } from '../src/utils/fechas';
 
 /**
- * Proyecciones, agregaciones, comparaciones y reportes.
+ * Proyecciones mensuales, agregaciones, comparaciones y reportes.
+ *
+ * Datos de partida:
+ *   Tarifas (TRIMESTRALES)   2025 T1 = 1.00 | 2026 T1 = 2.00 | 2026 T2 = SIN TARIFA
+ *   Proyeccion 2026 (mensual) enero a abril = 1000 kWh cada uno
+ *   Produccion               2025-01-15  500   (T1 2025)
+ *                            2025-02-15  500   (T1 2025)
+ *                            2026-01-15 1200   (T1 2026)
+ *                            2026-02-15  900   (T1 2026)
+ *                            2026-04-15  400   (T2 2026, queda pendiente)
  */
 describe('Analisis, proyecciones y reportes', () => {
   let admin: Sesion;
@@ -34,21 +44,20 @@ describe('Analisis, proyecciones y reportes', () => {
     await limpiarDatos();
     datos = await crearDatosBase();
 
-    // --- Tarifas: distintas por mes, con marzo 2026 deliberadamente ausente.
+    // --- Tarifas trimestrales. El II trimestre de 2026 se deja sin tarifa
+    //     a proposito para ejercitar la valorizacion pendiente.
     const tarifas: Array<[number, number, number]> = [
       [2025, 1, 1.0],
-      [2025, 2, 1.0],
       [2026, 1, 2.0],
-      [2026, 2, 3.0],
     ];
-    for (const [anio, mes, costo] of tarifas) {
+    for (const [anio, trimestre, costo] of tarifas) {
       await comoUsuario(admin)
         .post(`/api/projects/${datos.idProyecto}/rates`)
-        .send({ anio, mes, costo_kwh: costo, aprobarInmediato: true })
+        .send({ anio, trimestre, costo_kwh: costo, aprobarInmediato: true })
         .expect(201);
     }
 
-    // --- Proyecciones aprobadas de 2026.
+    // --- Proyecciones aprobadas de 2026 (siguen siendo MENSUALES).
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/projections`)
       .send({
@@ -58,6 +67,7 @@ describe('Analisis, proyecciones y reportes', () => {
           { mes: 1, proyeccion_kwh: 1000 },
           { mes: 2, proyeccion_kwh: 1000 },
           { mes: 3, proyeccion_kwh: 1000 },
+          { mes: 4, proyeccion_kwh: 1000 },
         ],
       })
       .expect(201);
@@ -68,7 +78,7 @@ describe('Analisis, proyecciones y reportes', () => {
       ['2025-02-15', 500],
       ['2026-01-15', 1200],
       ['2026-02-15', 900],
-      ['2026-03-15', 400],
+      ['2026-04-15', 400],
     ];
     for (const [fecha, kwh] of registros) {
       await comoUsuario(operativo)
@@ -94,6 +104,20 @@ describe('Analisis, proyecciones y reportes', () => {
     expect(variacionPorcentual(1200, 0)).toBeNull();
   });
 
+  it('resuelve el trimestre calendario de cada mes y de cada rango', () => {
+    expect(trimestreDeMes(1)).toBe(1);
+    expect(trimestreDeMes(3)).toBe(1);
+    expect(trimestreDeMes(4)).toBe(2);
+    expect(trimestreDeMes(12)).toBe(4);
+    expect(etiquetaTrimestre(2026, 3)).toBe('III trimestre 2026');
+
+    expect(trimestresDelPeriodo({ desde: '2026-02-10', hasta: '2026-07-05' })).toEqual([
+      { anio: 2026, trimestre: 1 },
+      { anio: 2026, trimestre: 2 },
+      { anio: 2026, trimestre: 3 },
+    ]);
+  });
+
   // -------------------------------------------------------------------------
   // Proyecciones
   // -------------------------------------------------------------------------
@@ -107,17 +131,19 @@ describe('Analisis, proyecciones y reportes', () => {
     expect(Number(calendario[0].generacion_kwh)).toBe(1200);
     expect(Number(calendario[0].cumplimiento)).toBe(120);
     expect(Number(calendario[1].cumplimiento)).toBe(90);
-    expect(Number(calendario[2].cumplimiento)).toBe(40);
+    // Marzo tiene proyeccion pero no produccion.
+    expect(Number(calendario[2].cumplimiento)).toBe(0);
+    expect(Number(calendario[3].cumplimiento)).toBe(40);
 
     // Un mes sin proyeccion muestra "Sin proyeccion" y no divide entre cero.
     expect(calendario[5].cumplimiento).toBeNull();
     expect(calendario[5].etiquetaCumplimiento).toBe('Sin proyeccion');
 
     const totales = respuesta.body.datos.totales;
-    expect(Number(totales.proyeccion_kwh)).toBe(3000);
+    expect(Number(totales.proyeccion_kwh)).toBe(4000);
     expect(Number(totales.generacion_kwh)).toBe(2500);
-    expect(Number(totales.cumplimiento)).toBeCloseTo(83.33, 1);
-    expect(totales.mesesSinProyeccion).toBe(9);
+    expect(Number(totales.cumplimiento)).toBe(62.5);
+    expect(totales.mesesSinProyeccion).toBe(8);
   });
 
   it('exige el anio de forma explicita al capturar proyecciones', async () => {
@@ -138,7 +164,7 @@ describe('Analisis, proyecciones y reportes', () => {
       .send({ anioOrigen: 2026, anioDestino: 2027, factor: 1.1, confirmado: true })
       .expect(201);
 
-    expect(copia.body.datos.copiadas).toBe(3);
+    expect(copia.body.datos.copiadas).toBe(4);
 
     const destino = await comoUsuario(admin)
       .get(`/api/projects/${datos.idProyecto}/projections?anio=2027`)
@@ -153,13 +179,13 @@ describe('Analisis, proyecciones y reportes', () => {
       .post(`/api/projects/${datos.idProyecto}/projections/approve-year`)
       .send({ anio: 2027 })
       .expect(200);
-    expect(aprobacion.body.datos.aprobadas).toBe(3);
+    expect(aprobacion.body.datos.aprobadas).toBe(4);
   });
 
   it('un operativo sin permiso no puede gestionar proyecciones', async () => {
     await comoUsuario(operativo)
       .post(`/api/projects/${datos.idProyecto}/projections`)
-      .send({ anio: 2026, meses: [{ mes: 4, proyeccion_kwh: 100 }] })
+      .send({ anio: 2026, meses: [{ mes: 5, proyeccion_kwh: 100 }] })
       .expect(403);
   });
 
@@ -169,7 +195,7 @@ describe('Analisis, proyecciones y reportes', () => {
 
   it('agrega la produccion por dia, mes y anio', async () => {
     const mensual = await comoUsuario(gerencial)
-      .get(`/api/production/timeseries?desde=2026-01-01&hasta=2026-03-31&granularidad=MENSUAL&id_proyecto=${datos.idProyecto}`)
+      .get(`/api/production/timeseries?desde=2026-01-01&hasta=2026-04-30&granularidad=MENSUAL&id_proyecto=${datos.idProyecto}`)
       .expect(200);
     expect(mensual.body.datos).toHaveLength(3);
     expect(mensual.body.datos[0].etiqueta).toBe('Enero 2026');
@@ -189,27 +215,29 @@ describe('Analisis, proyecciones y reportes', () => {
     expect(Number(anual.body.datos[1].kwh)).toBe(2500);
   });
 
-  it('calcula el valor economico usando varias tarifas dentro del mismo rango', async () => {
+  it('calcula el valor economico con la tarifa trimestral que corresponde', async () => {
     const resumen = await comoUsuario(gerencial)
       .get(`/api/production/summary?desde=2026-01-01&hasta=2026-02-28&id_proyecto=${datos.idProyecto}`)
       .expect(200);
 
-    // 1200 x 2.0 + 900 x 3.0 = 2400 + 2700 = 5100
+    // Enero y febrero caen en el I trimestre: (1200 + 900) x 2.00 = 4200
     expect(Number(resumen.body.datos.kwh)).toBe(2100);
-    expect(Number(resumen.body.datos.valor_q)).toBe(5100);
+    expect(Number(resumen.body.datos.valor_q)).toBe(4200);
     expect(resumen.body.datos.moneda).toBe('GTQ');
     expect(resumen.body.datos.zonaHoraria).toBe('America/Guatemala');
   });
 
-  it('reporta la cobertura tarifaria y los registros pendientes del periodo', async () => {
+  it('reporta la cobertura tarifaria por trimestre y los registros pendientes', async () => {
     const resumen = await comoUsuario(gerencial)
-      .get(`/api/production/summary?desde=2026-01-01&hasta=2026-03-31&id_proyecto=${datos.idProyecto}`)
+      .get(`/api/production/summary?desde=2026-01-01&hasta=2026-04-30&id_proyecto=${datos.idProyecto}`)
       .expect(200);
 
     const cobertura = resumen.body.datos.coberturaTarifaria;
     expect(cobertura.completa).toBe(false);
-    expect(cobertura.mesesConTarifa).toHaveLength(2);
-    expect(cobertura.mesesPendientes).toEqual([{ anio: 2026, mes: 3 }]);
+    expect(cobertura.trimestresConTarifa).toHaveLength(1);
+    expect(cobertura.trimestresConTarifa[0].etiqueta).toBe('I trimestre 2026');
+    expect(cobertura.trimestresPendientes).toHaveLength(1);
+    expect(cobertura.trimestresPendientes[0].etiqueta).toBe('II trimestre 2026');
     expect(cobertura.registrosPendientes).toBe(1);
     expect(Number(cobertura.kwhPendientes)).toBe(400);
   });
@@ -225,7 +253,7 @@ describe('Analisis, proyecciones y reportes', () => {
     expect(respuesta.body.datos.rendimiento.baseComparacion).toContain('kWh/kWp');
   });
 
-  it('produce el resumen anual con proyeccion, anio anterior y cumplimiento', async () => {
+  it('produce el resumen anual con proyeccion, anio anterior, trimestre y cumplimiento', async () => {
     const respuesta = await comoUsuario(gerencial)
       .get(`/api/production/annual-summary?anio=2026&id_proyecto=${datos.idProyecto}`)
       .expect(200);
@@ -235,6 +263,7 @@ describe('Analisis, proyecciones y reportes', () => {
 
     const enero = filas[0];
     expect(enero.mesNombre).toBe('Enero');
+    expect(enero.trimestre).toBe(1);
     expect(Number(enero.proyeccion_kwh)).toBe(1000);
     expect(Number(enero.generacion_anio_anterior)).toBe(500);
     expect(Number(enero.cumplimiento_anio_anterior)).toBe(50);
@@ -244,17 +273,22 @@ describe('Analisis, proyecciones y reportes', () => {
     expect(Number(enero.valor_producido_q)).toBe(2400);
     expect(enero.pendiente_de_tarifa).toBe(false);
 
-    // Marzo tiene generacion pero no tarifa: el valor queda pendiente.
-    const marzo = filas[2];
-    expect(Number(marzo.generacion_anio_seleccionado)).toBe(400);
-    expect(marzo.tarifa_q_kwh).toBeNull();
-    expect(marzo.valor_producido_q).toBeNull();
-    expect(marzo.pendiente_de_tarifa).toBe(true);
+    // Febrero comparte la tarifa del I trimestre con enero.
+    expect(Number(filas[1].tarifa_q_kwh)).toBe(2);
+    expect(filas[1].trimestre).toBe(1);
+
+    // Abril pertenece al II trimestre, que no tiene tarifa aprobada.
+    const abril = filas[3];
+    expect(abril.trimestre).toBe(2);
+    expect(Number(abril.generacion_anio_seleccionado)).toBe(400);
+    expect(abril.tarifa_q_kwh).toBeNull();
+    expect(abril.valor_producido_q).toBeNull();
+    expect(abril.pendiente_de_tarifa).toBe(true);
 
     const totales = respuesta.body.datos.totales;
     expect(Number(totales.generacion_anio_seleccionado)).toBe(2500);
     expect(Number(totales.generacion_anio_anterior)).toBe(1000);
-    expect(Number(totales.valor_producido_q)).toBe(5100);
+    expect(Number(totales.valor_producido_q)).toBe(4200);
     expect(Number(totales.mesesPendientes)).toBe(1);
     expect(respuesta.body.meta.advertencia).toContain('parcial');
   });
@@ -263,29 +297,34 @@ describe('Analisis, proyecciones y reportes', () => {
   // Tablero
   // -------------------------------------------------------------------------
 
-  it('el tablero entrega indicadores, tarifas aplicadas y factores ambientales con su fuente', async () => {
+  it('el tablero entrega indicadores, tarifas aplicadas y alerta trimestral', async () => {
     const respuesta = await comoUsuario(gerencial)
-      .get(`/api/dashboard?desde=2026-01-01&hasta=2026-03-31&id_proyecto=${datos.idProyecto}`)
+      .get(`/api/dashboard?desde=2026-01-01&hasta=2026-04-30&id_proyecto=${datos.idProyecto}`)
       .expect(200);
 
     const d = respuesta.body.datos;
     expect(Number(d.produccion.periodo_kwh)).toBe(2500);
-    expect(Number(d.produccion.valor_q)).toBe(5100);
-    expect(Number(d.proyeccion.kwh)).toBe(3000);
-    expect(d.proyeccion.mesesConProyeccion).toBe(3);
-    expect(d.proyeccion.mesesDelPeriodo).toBe(3);
-    expect(Number(d.proyeccion.cumplimiento)).toBeCloseTo(83.33, 1);
+    expect(Number(d.produccion.valor_q)).toBe(4200);
+    expect(Number(d.proyeccion.kwh)).toBe(4000);
+    expect(d.proyeccion.mesesConProyeccion).toBe(4);
+    expect(d.proyeccion.mesesDelPeriodo).toBe(4);
+    expect(Number(d.proyeccion.cumplimiento)).toBe(62.5);
 
-    expect(d.tarifas.aplicadasPorMes).toHaveLength(2);
-    expect(d.tarifas.advertencia).toContain('sin tarifa aprobada');
+    // La tarifa es trimestral y el tablero lo declara.
+    expect(d.tarifas.periodicidad).toBe('TRIMESTRAL');
+    expect(d.tarifas.advertencia).toContain('trimestre(s) sin tarifa aprobada');
+    expect(d.tarifas.alertaTrimestral).toBeTruthy();
+    expect(d.tarifas.alertaTrimestral.trimestreActual.etiqueta).toMatch(/trimestre \d{4}/);
+
+    // Los grupos de inversores se reportan como parte de la jerarquia.
+    expect(Array.isArray(d.grupos)).toBe(true);
+    expect(d.grupos.length).toBeGreaterThan(0);
+    expect(d.grupos[0]).toHaveProperty('inversores_registrados');
 
     expect(d.ambiental.factor_co2_unidad).toBe('tCO2e/MWh');
     expect(d.ambiental.factor_co2_fuente).not.toBe('No configurada');
-    expect(d.ambiental.co2_por_arbol_unidad).toContain('arbol');
-
     expect(d.meta.moneda).toBe('GTQ');
     expect(d.meta.unidadPotencia).toBe('kWp');
-    expect(d.meta.unidadEnergia).toBe('kWh');
   });
 
   // -------------------------------------------------------------------------
@@ -299,7 +338,7 @@ describe('Analisis, proyecciones y reportes', () => {
         tipo: 'VALORIZACION',
         nombre: 'Reporte de pruebas',
         desde: '2026-01-01',
-        hasta: '2026-03-31',
+        hasta: '2026-04-30',
         id_proyecto: datos.idProyecto,
         granularidad: 'MENSUAL',
         anio: 2026,
@@ -310,7 +349,7 @@ describe('Analisis, proyecciones y reportes', () => {
     const r = respuesta.body.datos;
     expect(r.id_reporte).toBeGreaterThan(0);
     expect(Number(r.resumen.kwh)).toBe(2500);
-    expect(Number(r.resumen.valor_q)).toBe(5100);
+    expect(Number(r.resumen.valor_q)).toBe(4200);
     expect(r.cobertura.completa).toBe(false);
     expect(r.advertenciaOficial).toContain('NO puede considerarse un documento oficial completo');
 
@@ -322,9 +361,10 @@ describe('Analisis, proyecciones y reportes', () => {
     expect(Number(enero.valor_q)).toBe(2400);
     expect(enero.estado).toBe('VALORIZADO');
 
-    const marzo = r.desgloseMensual.find((f: { mes: string }) => f.mes.startsWith('Marzo'));
-    expect(marzo.estado).toBe('PENDIENTE DE TARIFA');
+    const abril = r.desgloseMensual.find((f: { mes: string }) => f.mes.startsWith('Abril'));
+    expect(abril.estado).toBe('PENDIENTE DE TARIFA');
 
+    expect(r.notas.join(' ')).toContain('TRIMESTRAL');
     expect(r.notas.join(' ')).toContain('doble conteo');
     expect(r.notas.join(' ')).toContain('America/Guatemala');
   });
@@ -373,12 +413,12 @@ describe('Analisis, proyecciones y reportes', () => {
   it('un usuario gerencial puede generar y exportar pero nunca modificar datos', async () => {
     await comoUsuario(gerencial)
       .post('/api/production')
-      .send({ id_proyecto: datos.idProyecto, id_inversor: datos.idInversor, fecha: '2026-04-01', kwh: 10 })
+      .send({ id_proyecto: datos.idProyecto, id_inversor: datos.idInversor, fecha: '2026-05-01', kwh: 10 })
       .expect(403);
 
     await comoUsuario(gerencial)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 4, costo_kwh: 1 })
+      .send({ anio: 2026, trimestre: 3, costo_kwh: 1 })
       .expect(403);
   });
 

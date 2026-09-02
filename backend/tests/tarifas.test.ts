@@ -17,7 +17,7 @@ import { execute, queryOne } from '../src/db/pool';
 import { calcularValorQ, parsearNumero, redondear } from '../src/utils/numeros';
 import { normalizarMes, normalizarFecha, periodoAnterior, mesesDelPeriodo } from '../src/utils/fechas';
 
-describe('Tarifas mensuales y valorizacion', () => {
+describe('Tarifas trimestrales y valorizacion', () => {
   let admin: Sesion;
   let coordinador: Sesion;
   let operativo: Sesion;
@@ -97,63 +97,75 @@ describe('Tarifas mensuales y valorizacion', () => {
   // Registro y aprobacion
   // -------------------------------------------------------------------------
 
-  it('permite registrar tarifas diferentes en meses consecutivos', async () => {
+  it('permite registrar tarifas diferentes en trimestres consecutivos', async () => {
     await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 1, costo_kwh: 1.15, aprobarInmediato: false })
+      .send({ anio: 2026, trimestre: 1, costo_kwh: 1.15, aprobarInmediato: false })
       .expect(201);
 
     await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 2, costo_kwh: 1.32, aprobarInmediato: false })
+      .send({ anio: 2026, trimestre: 2, costo_kwh: 1.32, aprobarInmediato: false })
       .expect(201);
 
     const calendario = await comoUsuario(coordinador)
       .get(`/api/projects/${datos.idProyecto}/rates?anio=2026`)
       .expect(200);
 
-    const enero = calendario.body.datos.calendario[0];
-    const febrero = calendario.body.datos.calendario[1];
-    expect(Number(enero.tarifa.costo_kwh)).toBe(1.15);
-    expect(Number(febrero.tarifa.costo_kwh)).toBe(1.32);
-    expect(enero.tarifa.estado).toBe('BORRADOR');
-    expect(calendario.body.datos.resumen.mesesSinTarifa).toBe(10);
+    const datosCalendario = calendario.body.datos;
+    expect(datosCalendario.periodicidad).toBe('TRIMESTRAL');
+    expect(datosCalendario.calendario).toHaveLength(4);
+
+    const primero = datosCalendario.calendario[0];
+    const segundo = datosCalendario.calendario[1];
+    expect(primero.etiqueta).toBe('I trimestre');
+    expect(primero.meses).toBe('Enero a Marzo');
+    expect(primero.mesesNumeros).toEqual([1, 2, 3]);
+    expect(Number(primero.tarifa.costo_kwh)).toBe(1.15);
+    expect(Number(segundo.tarifa.costo_kwh)).toBe(1.32);
+    expect(primero.tarifa.estado).toBe('BORRADOR');
+    expect(datosCalendario.resumen.trimestresSinTarifa).toBe(2);
   });
 
   it('impide dos tarifas vigentes para el mismo proyecto, anio y mes', async () => {
     await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 5, costo_kwh: 1.1 })
+      .send({ anio: 2026, trimestre: 2, costo_kwh: 1.1 })
       .expect(201);
 
     const duplicada = await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 5, costo_kwh: 1.2 })
+      .send({ anio: 2026, trimestre: 2, costo_kwh: 1.2 })
       .expect(409);
 
     expect(duplicada.body.error.mensaje).toContain('Ya existe una tarifa');
   });
 
-  it('rechaza tarifas negativas', async () => {
-    const respuesta = await comoUsuario(coordinador)
+  it('rechaza tarifas negativas y trimestres invalidos', async () => {
+    const negativa = await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 6, costo_kwh: -0.5 })
+      .send({ anio: 2026, trimestre: 2, costo_kwh: -0.5 })
       .expect(422);
+    expect(JSON.stringify(negativa.body.error.detalles)).toContain('negativo');
 
-    expect(JSON.stringify(respuesta.body.error.detalles)).toContain('negativo');
+    const trimestreInvalido = await comoUsuario(coordinador)
+      .post(`/api/projects/${datos.idProyecto}/rates`)
+      .send({ anio: 2026, trimestre: 5, costo_kwh: 1.1 })
+      .expect(422);
+    expect(JSON.stringify(trimestreInvalido.body.error.detalles)).toMatch(/trimestre|4/i);
   });
 
   it('un operativo sin tarifas.gestionar no puede crear tarifas', async () => {
     await comoUsuario(operativo)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 7, costo_kwh: 1.1 })
+      .send({ anio: 2026, trimestre: 3, costo_kwh: 1.1 })
       .expect(403);
   });
 
   it('el coordinador no puede aprobar por si mismo: la aprobacion es un permiso aparte', async () => {
     const respuesta = await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 8, costo_kwh: 1.1, aprobarInmediato: true })
+      .send({ anio: 2026, trimestre: 3, costo_kwh: 1.1, aprobarInmediato: true })
       .expect(403);
 
     expect(respuesta.body.error.detalles.permiso).toBe('tarifas.aprobar');
@@ -163,23 +175,25 @@ describe('Tarifas mensuales y valorizacion', () => {
   // Valorizacion
   // -------------------------------------------------------------------------
 
-  it('selecciona la tarifa correcta segun la fecha de cada registro de produccion', async () => {
+  it('selecciona la tarifa del TRIMESTRE al que pertenece cada registro', async () => {
+    // I trimestre a Q 1.00 y II trimestre a Q 2.00.
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 1, costo_kwh: 1.0, aprobarInmediato: true })
+      .send({ anio: 2026, trimestre: 1, costo_kwh: 1.0, aprobarInmediato: true })
       .expect(201);
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 2, costo_kwh: 2.0, aprobarInmediato: true })
+      .send({ anio: 2026, trimestre: 2, costo_kwh: 2.0, aprobarInmediato: true })
       .expect(201);
 
+    // Enero cae en el I trimestre; abril en el II.
     await comoUsuario(admin)
       .post('/api/production')
       .send({ id_proyecto: datos.idProyecto, id_inversor: datos.idInversor, fecha: '2026-01-15', kwh: 100 })
       .expect(201);
     await comoUsuario(admin)
       .post('/api/production')
-      .send({ id_proyecto: datos.idProyecto, id_inversor: datos.idInversor, fecha: '2026-02-15', kwh: 100 })
+      .send({ id_proyecto: datos.idProyecto, id_inversor: datos.idInversor, fecha: '2026-04-15', kwh: 100 })
       .expect(201);
 
     const filas = await filasProduccion(datos.idProyecto);
@@ -192,11 +206,31 @@ describe('Tarifas mensuales y valorizacion', () => {
     // El total del rango es la suma por registro: 100x1 + 100x2 = 300,
     // NUNCA 200 kWh x la tarifa del ultimo mes.
     const resumen = await comoUsuario(admin)
-      .get(`/api/production/summary?desde=2026-01-01&hasta=2026-02-28&id_proyecto=${datos.idProyecto}`)
+      .get(`/api/production/summary?desde=2026-01-01&hasta=2026-04-30&id_proyecto=${datos.idProyecto}`)
       .expect(200);
 
     expect(Number(resumen.body.datos.kwh)).toBe(200);
     expect(Number(resumen.body.datos.valor_q)).toBe(300);
+  });
+
+  it('aplica la MISMA tarifa a los tres meses de un trimestre', async () => {
+    await comoUsuario(admin)
+      .post(`/api/projects/${datos.idProyecto}/rates`)
+      .send({ anio: 2026, trimestre: 1, costo_kwh: 1.5, aprobarInmediato: true })
+      .expect(201);
+
+    for (const fecha of ['2026-01-10', '2026-02-10', '2026-03-10']) {
+      await comoUsuario(admin)
+        .post('/api/production')
+        .send({ id_proyecto: datos.idProyecto, id_inversor: datos.idInversor, fecha, kwh: 100 })
+        .expect(201);
+    }
+
+    const filas = await filasProduccion(datos.idProyecto);
+    expect(filas).toHaveLength(3);
+    // Los tres meses comparten la tarifa del trimestre.
+    expect(filas.every((f) => Number(f.costo_kwh_aplicado) === 1.5)).toBe(true);
+    expect(filas.every((f) => Number(f.valor_q) === 150)).toBe(true);
   });
 
   it('un mes sin tarifa conserva los kWh y deja la valorizacion pendiente', async () => {
@@ -227,14 +261,15 @@ describe('Tarifas mensuales y valorizacion', () => {
       .post('/api/production')
       .send({ id_proyecto: datos.idProyecto, id_inversor: datos.idInversor, fecha: '2026-05-10', kwh: 200 })
       .expect(201);
+    // Julio pertenece al III trimestre: NO debe valorizarse al aprobar el II.
     await comoUsuario(admin)
       .post('/api/production')
-      .send({ id_proyecto: datos.idProyecto, id_inversor: datos.idInversor, fecha: '2026-06-10', kwh: 300 })
+      .send({ id_proyecto: datos.idProyecto, id_inversor: datos.idInversor, fecha: '2026-07-10', kwh: 300 })
       .expect(201);
 
     const creada = await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 5, costo_kwh: 1.5 })
+      .send({ anio: 2026, trimestre: 2, costo_kwh: 1.5 })
       .expect(201);
 
     const aprobada = await comoUsuario(admin)
@@ -247,26 +282,26 @@ describe('Tarifas mensuales y valorizacion', () => {
     const filas = await filasProduccion(datos.idProyecto);
     expect(Number(filas[0].valor_q)).toBe(300);
     expect(filas[0].estado_valorizacion).toBe('VALORIZADA');
-    // Junio sigue pendiente: no se contamino con la tarifa de mayo.
+    // Julio sigue pendiente: pertenece al III trimestre, que no tiene tarifa.
     expect(filas[1].estado_valorizacion).toBe('PENDIENTE_DE_TARIFA');
     expect(filas[1].valor_q).toBeNull();
   });
 
-  it('copiar la tarifa del mes anterior exige confirmacion explicita y crea un borrador', async () => {
+  it('copiar la tarifa del trimestre anterior exige confirmacion explicita y crea un borrador', async () => {
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 1, costo_kwh: 1.23, aprobarInmediato: true })
+      .send({ anio: 2026, trimestre: 1, costo_kwh: 1.23, aprobarInmediato: true })
       .expect(201);
 
     // Sin confirmacion explicita la operacion se rechaza.
     await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates/copy-previous`)
-      .send({ anio: 2026, mes: 2 })
+      .send({ anio: 2026, trimestre: 2 })
       .expect(422);
 
     const copia = await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates/copy-previous`)
-      .send({ anio: 2026, mes: 2, confirmado: true })
+      .send({ anio: 2026, trimestre: 2, confirmado: true })
       .expect(201);
 
     expect(Number(copia.body.datos.costo_kwh)).toBe(1.23);
@@ -287,7 +322,7 @@ describe('Tarifas mensuales y valorizacion', () => {
   it('corrige una tarifa ya utilizada solo tras analizar el impacto y con motivo', async () => {
     const tarifa = await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 3, costo_kwh: 1.0, aprobarInmediato: true })
+      .send({ anio: 2026, trimestre: 1, costo_kwh: 1.0, aprobarInmediato: true })
       .expect(201);
     const idTarifa = tarifa.body.datos.id_tarifa;
 
@@ -310,7 +345,8 @@ describe('Tarifas mensuales y valorizacion', () => {
     expect(Number(impacto.body.datos.valorAnterior)).toBe(1500);
     expect(Number(impacto.body.datos.valorNuevo)).toBe(1875);
     expect(Number(impacto.body.datos.diferencia)).toBe(375);
-    expect(impacto.body.datos.advertencia).toContain('valores historicos');
+    expect(impacto.body.datos.advertencia).toContain('registro(s) historicos');
+    expect(impacto.body.datos.etiqueta).toBe('I trimestre 2026');
 
     // Sin confirmacion o sin motivo suficiente se rechaza.
     await comoUsuario(admin)
@@ -351,7 +387,7 @@ describe('Tarifas mensuales y valorizacion', () => {
   it('un usuario sin tarifas.recalcular no puede corregir una tarifa aprobada', async () => {
     const tarifa = await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2026, mes: 9, costo_kwh: 1.0, aprobarInmediato: true })
+      .send({ anio: 2026, trimestre: 3, costo_kwh: 1.0, aprobarInmediato: true })
       .expect(201);
 
     await comoUsuario(coordinador)
@@ -363,7 +399,7 @@ describe('Tarifas mensuales y valorizacion', () => {
   it('anular una tarifa conserva los kWh y devuelve los registros a pendiente', async () => {
     const tarifa = await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, mes: 10, costo_kwh: 1.4, aprobarInmediato: true })
+      .send({ anio: 2025, trimestre: 4, costo_kwh: 1.4, aprobarInmediato: true })
       .expect(201);
 
     await comoUsuario(admin)
@@ -386,7 +422,7 @@ describe('Tarifas mensuales y valorizacion', () => {
     // Tras anular se puede registrar una nueva tarifa para el mismo mes.
     await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, mes: 10, costo_kwh: 1.6 })
+      .send({ anio: 2025, trimestre: 4, costo_kwh: 1.6 })
       .expect(201);
   });
 
@@ -408,7 +444,7 @@ describe('Tarifas mensuales y valorizacion', () => {
 
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, mes: 11, costo_kwh: 1.1, aprobarInmediato: true })
+      .send({ anio: 2025, trimestre: 4, costo_kwh: 1.1, aprobarInmediato: true })
       .expect(201);
 
     await comoUsuario(admin)
@@ -443,7 +479,7 @@ describe('Tarifas mensuales y valorizacion', () => {
   it('la correccion manual de produccion recalcula el valor y exige motivo auditado', async () => {
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, mes: 12, costo_kwh: 2.0, aprobarInmediato: true })
+      .send({ anio: 2025, trimestre: 4, costo_kwh: 2.0, aprobarInmediato: true })
       .expect(201);
 
     const registro = await comoUsuario(admin)
@@ -494,5 +530,107 @@ describe('Tarifas mensuales y valorizacion', () => {
 
     expect(respuesta.body.error.mensaje).toContain('no pertenece al proyecto');
     await execute('DELETE FROM inversores WHERE id_proyecto = ?', [otros.idProyecto]);
+  });
+});
+
+/**
+ * Alerta de actualizacion trimestral.
+ *
+ * La tarifa del kWh se actualiza cada trimestre calendario, asi que el sistema
+ * debe avisar al usuario cuando el trimestre en curso no tiene tarifa aprobada
+ * y, con anticipacion, cuando el trimestre siguiente tampoco la tiene.
+ */
+describe('Alerta de actualizacion trimestral de la tarifa', () => {
+  let admin: Sesion;
+  let gerencial: Sesion;
+  let datos: DatosBase;
+
+  beforeAll(async () => {
+    await prepararBaseDeDatos();
+    await crearUsuario('al.admin@retse.com.gt', 'ADMINISTRATIVO');
+    await crearUsuario('al.ger@retse.com.gt', 'GERENCIAL');
+    admin = await iniciarSesion('al.admin@retse.com.gt', PASSWORD_PRUEBAS);
+    gerencial = await iniciarSesion('al.ger@retse.com.gt', PASSWORD_PRUEBAS);
+
+    await limpiarDatos();
+    datos = await crearDatosBase('-alerta');
+  }, 120000);
+
+  afterAll(async () => {
+    await cerrarTodo();
+  });
+
+  it('avisa que el trimestre en curso no tiene tarifa aprobada', async () => {
+    const alerta = await comoUsuario(gerencial)
+      .get(`/api/projects/${datos.idProyecto}/rates/alert`)
+      .expect(200);
+
+    const a = alerta.body.datos;
+    expect(a.requiereAtencion).toBe(true);
+    expect(a.proyectosSinTarifaActual).toHaveLength(1);
+    expect(a.mensaje).toContain('no tienen tarifa aprobada');
+    expect(a.mensaje).toContain('sin valor economico');
+    expect(a.trimestreActual.etiqueta).toMatch(/^(I|II|III|IV) trimestre \d{4}$/);
+    expect(a.diasRestantes).toBeGreaterThanOrEqual(0);
+  });
+
+  it('el trimestre siguiente al actual nunca es el mismo', async () => {
+    const alerta = await comoUsuario(gerencial)
+      .get(`/api/projects/${datos.idProyecto}/rates/alert`)
+      .expect(200);
+
+    const a = alerta.body.datos;
+    expect(a.trimestreSiguiente.etiqueta).not.toBe(a.trimestreActual.etiqueta);
+    if (a.trimestreActual.trimestre === 4) {
+      expect(a.trimestreSiguiente.anio).toBe(a.trimestreActual.anio + 1);
+      expect(a.trimestreSiguiente.trimestre).toBe(1);
+    } else {
+      expect(a.trimestreSiguiente.trimestre).toBe(a.trimestreActual.trimestre + 1);
+    }
+  });
+
+  it('la alerta del trimestre en curso desaparece al aprobar su tarifa', async () => {
+    const previa = await comoUsuario(gerencial)
+      .get(`/api/projects/${datos.idProyecto}/rates/alert`)
+      .expect(200);
+    const { anio, trimestre } = previa.body.datos.trimestreActual;
+
+    await comoUsuario(admin)
+      .post(`/api/projects/${datos.idProyecto}/rates`)
+      .send({ anio, trimestre, costo_kwh: 1.25, aprobarInmediato: true })
+      .expect(201);
+
+    const despues = await comoUsuario(gerencial)
+      .get(`/api/projects/${datos.idProyecto}/rates/alert`)
+      .expect(200);
+
+    expect(despues.body.datos.proyectosSinTarifaActual).toHaveLength(0);
+
+    // Con menos dias que el umbral de aviso, la alerta se mantiene por el
+    // trimestre siguiente, que todavia no tiene tarifa registrada.
+    if (despues.body.datos.diasRestantes <= despues.body.datos.diasDeAviso) {
+      expect(despues.body.datos.requiereAtencion).toBe(true);
+      expect(despues.body.datos.mensaje).toContain('antes del cambio de trimestre');
+    } else {
+      expect(despues.body.datos.requiereAtencion).toBe(false);
+      expect(despues.body.datos.mensaje).toBeNull();
+    }
+  });
+
+  it('el tablero publica la misma alerta junto a los indicadores', async () => {
+    const tablero = await comoUsuario(gerencial)
+      .get(`/api/dashboard?desde=2026-01-01&hasta=2026-12-31&id_proyecto=${datos.idProyecto}`)
+      .expect(200);
+
+    expect(tablero.body.datos.tarifas.periodicidad).toBe('TRIMESTRAL');
+    expect(tablero.body.datos.tarifas.alertaTrimestral.trimestreActual).toBeTruthy();
+  });
+
+  it('un usuario sin permiso de tarifas no consulta la alerta', async () => {
+    await crearUsuario('al.sin@retse.com.gt', 'OPERATIVO', [], ['tarifas.ver']);
+    const sinPermiso = await iniciarSesion('al.sin@retse.com.gt', PASSWORD_PRUEBAS);
+    await comoUsuario(sinPermiso)
+      .get(`/api/projects/${datos.idProyecto}/rates/alert`)
+      .expect(403);
   });
 });

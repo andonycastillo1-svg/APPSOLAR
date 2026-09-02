@@ -86,12 +86,13 @@ columna generada `STORED`** no puede usar `CASCADE`, `SET NULL` ni `SET DEFAULT`
 |---|---|
 | `buscarTarifaAprobada` | Tarifa vigente de un proyecto/año/mes |
 | `CacheTarifas` | Evita repetir consultas al valorizar lotes grandes |
-| `calcularValorizacion` | Devuelve `id_tarifa`, `costo_kwh_aplicado`, `valor_q` y estado |
-| `recalcularPendientes` | Valoriza los registros pendientes tras aprobar una tarifa |
-| `analizarImpacto` | Cálculo previo obligatorio antes de corregir una tarifa usada |
+| `calcularValorizacion` | Devuelve `id_tarifa`, `costo_kwh_aplicado`, `valor_q` y estado, resolviendo el **trimestre** de la fecha |
+| `recalcularPendientes` | Valoriza los registros pendientes de los **tres meses** del trimestre tras aprobar su tarifa |
+| `analizarImpacto` | Cálculo previo obligatorio antes de corregir una tarifa usada; informa también qué meses del trimestre están cerrados |
+| `alertaTarifaTrimestral` | Aviso de que toca actualizar la tarifa del trimestre en curso o del siguiente |
 | `recalcularPorTarifa` | Aplica la corrección a todos los registros afectados |
 | `exigirMesAbierto` | Bloquea operaciones sobre periodos cerrados |
-| `coberturaTarifaria` | Indicador de meses con y sin tarifa del periodo |
+| `coberturaTarifaria` | Indicador de **trimestres** con y sin tarifa del periodo |
 
 **Invariante:** `valor_q` **siempre** se deriva de `kwh × costo_kwh_aplicado`.
 Ninguna ruta permite editarlo directamente.

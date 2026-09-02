@@ -695,3 +695,47 @@ legend { font-size: 0.84rem; font-weight: 640; color: var(--azul-800); padding: 
 @media (max-width: 420px) {
   .rejilla { grid-template-columns: 1fr; }
 }
+
+/* --------------------------------- Alta guiada de proyectos y grupos */
+
+/* Distintivo numerico dentro de cada paso del asistente (ver .pasos). */
+.pasos__numero {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 50%;
+  background: var(--gris-300);
+  color: var(--azul-900);
+  font-size: 0.72rem;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.pasos li[aria-current='step'] .pasos__numero { background: var(--blanco); color: var(--azul-800); }
+
+/* Rejilla compacta de los 12 meses de la proyeccion. */
+.formulario--meses {
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  margin-top: 0.9rem;
+}
+
+/* Cada grupo declarado durante el alta. */
+.grupo-alta {
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-sm);
+  padding: 0.9rem;
+  margin: 0.9rem 0;
+}
+.grupo-alta legend {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0 0.35rem;
+  color: var(--texto-suave);
+}
+
+.resumen-linea {
+  margin: 0.9rem 0 0;
+  font-size: 0.88rem;
+  color: var(--texto-suave);
+}

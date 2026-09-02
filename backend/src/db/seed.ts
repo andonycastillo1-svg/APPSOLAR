@@ -245,6 +245,66 @@ export async function sembrarDemostracion(): Promise<void> {
     idsProyecto.push(resultado.insertId);
   }
 
+  // --- Grupos de inversores ---------------------------------------------
+  // Jerarquia PROYECTO -> GRUPO -> INVERSOR. Cada grupo declara cuantos
+  // inversores deberia tener y si cuenta con banco de baterias.
+  const definicionGrupos = [
+    {
+      proyecto: 0,
+      nombre: 'Bloque A - Campo norte',
+      inversores: 2,
+      baterias: 800,
+      kwp: 1000,
+      ubicacion: 'Sector norte de la finca',
+    },
+    {
+      proyecto: 0,
+      nombre: 'Bloque B - Campo sur',
+      inversores: 1,
+      baterias: null,
+      kwp: 250,
+      ubicacion: 'Sector sur de la finca',
+    },
+    {
+      proyecto: 1,
+      nombre: 'Bloque unico',
+      inversores: 0,
+      baterias: null,
+      kwp: 800,
+      ubicacion: 'Techo de nave principal',
+    },
+    {
+      proyecto: 2,
+      nombre: 'Bloque techo planta',
+      inversores: 2,
+      baterias: 250,
+      kwp: 450,
+      ubicacion: 'Techo de la planta textil',
+    },
+  ];
+
+  const idsGrupo: number[] = [];
+  for (const grupo of definicionGrupos) {
+    const resultado = await execute(
+      `INSERT INTO grupos
+         (id_proyecto, nombre, cantidad_inversores_declarada, tiene_banco_baterias,
+          capacidad_baterias_kwh, capacidad_kwp, ubicacion, observaciones, activo, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+      [
+        idsProyecto[grupo.proyecto],
+        grupo.nombre,
+        grupo.inversores,
+        grupo.baterias ? 1 : 0,
+        grupo.baterias,
+        grupo.kwp,
+        grupo.ubicacion,
+        'Grupo de demostracion.',
+        usuarios.admin,
+      ],
+    );
+    idsGrupo.push(resultado.insertId);
+  }
+
   // --- Configuracion de la integracion Huawei (modo simulado) -----------
   const idApi = (
     await execute(
@@ -262,24 +322,32 @@ export async function sembrarDemostracion(): Promise<void> {
   ).insertId;
 
   // --- Inversores -------------------------------------------------------
-  const inversores: Array<{ id: number; proyecto: number; participacion: number; huawei: boolean }> = [];
+  const inversores: Array<{
+    id: number;
+    proyecto: number;
+    grupo: number;
+    participacion: number;
+    huawei: boolean;
+  }> = [];
 
+  // El indice `grupo` apunta a `idsGrupo`.
   const definicionInversores = [
-    { proyecto: 0, marca: 'Huawei', modelo: 'SUN2000-100KTL-M1', conexion: 'HUAWEI_API', serial: 'HW-ESC-001', kwp: 500, participacion: 0.4 },
-    { proyecto: 0, marca: 'Huawei', modelo: 'SUN2000-100KTL-M1', conexion: 'HUAWEI_API', serial: 'HW-ESC-002', kwp: 500, participacion: 0.4 },
-    { proyecto: 0, marca: 'Fronius', modelo: 'Symo 24.0-3', conexion: 'MANUAL', serial: 'FR-ESC-003', kwp: 250, participacion: 0.2 },
-    { proyecto: 2, marca: 'SMA', modelo: 'Sunny Tripower 25000TL', conexion: 'MANUAL', serial: 'SMA-XELA-001', kwp: 250, participacion: 0.55 },
-    { proyecto: 2, marca: 'SMA', modelo: 'Sunny Tripower 20000TL', conexion: 'MANUAL', serial: 'SMA-XELA-002', kwp: 200, participacion: 0.45 },
+    { proyecto: 0, grupo: 0, marca: 'Huawei', modelo: 'SUN2000-100KTL-M1', conexion: 'HUAWEI_API', serial: 'HW-ESC-001', kwp: 500, participacion: 0.4 },
+    { proyecto: 0, grupo: 0, marca: 'Huawei', modelo: 'SUN2000-100KTL-M1', conexion: 'HUAWEI_API', serial: 'HW-ESC-002', kwp: 500, participacion: 0.4 },
+    { proyecto: 0, grupo: 1, marca: 'Fronius', modelo: 'Symo 24.0-3', conexion: 'MANUAL', serial: 'FR-ESC-003', kwp: 250, participacion: 0.2 },
+    { proyecto: 2, grupo: 3, marca: 'SMA', modelo: 'Sunny Tripower 25000TL', conexion: 'MANUAL', serial: 'SMA-XELA-001', kwp: 250, participacion: 0.55 },
+    { proyecto: 2, grupo: 3, marca: 'SMA', modelo: 'Sunny Tripower 20000TL', conexion: 'MANUAL', serial: 'SMA-XELA-002', kwp: 200, participacion: 0.45 },
   ];
 
   for (const definicion of definicionInversores) {
     const resultado = await execute(
       `INSERT INTO inversores
-         (id_proyecto, marca, modelo, tipo_conexion, serial_externo, estacion_externa,
+         (id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo, estacion_externa,
           capacidad_kwp, estado, id_api, observaciones, activo, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?, ?, 1, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?, ?, 1, ?)`,
       [
         idsProyecto[definicion.proyecto],
+        idsGrupo[definicion.grupo],
         definicion.marca,
         definicion.modelo,
         definicion.conexion,
@@ -294,32 +362,44 @@ export async function sembrarDemostracion(): Promise<void> {
     inversores.push({
       id: resultado.insertId,
       proyecto: definicion.proyecto,
+      grupo: definicion.grupo,
       participacion: definicion.participacion,
       huawei: definicion.conexion === 'HUAWEI_API',
     });
   }
 
-  // --- Tarifas mensuales ------------------------------------------------
-  // Las tarifas CAMBIAN entre meses y un mes queda deliberadamente PENDIENTE
-  // para demostrar la alerta de valorizacion.
-  const mesPendiente = Math.max(1, mesActual - 1);
+  // --- Tarifas TRIMESTRALES ---------------------------------------------
+  // El costo del kWh se pacta por trimestre calendario: los tres meses de un
+  // trimestre comparten siempre la misma tarifa. El trimestre en curso del
+  // primer proyecto queda deliberadamente SIN tarifa para que la alerta de
+  // actualizacion trimestral sea visible en la demostracion.
+  const trimestreActualDemo = Math.ceil(mesActual / 3);
   const tarifasPorProyecto = [1.12, 0.98, 1.35];
 
   for (let indice = 0; indice < idsProyecto.length; indice += 1) {
     const base = tarifasPorProyecto[indice];
     for (const anio of [anioAnterior, anioActual]) {
-      const mesesDelAnio = anio === anioActual ? mesActual : 12;
-      for (let mes = 1; mes <= mesesDelAnio; mes += 1) {
-        // Mes deliberadamente sin tarifa en el primer proyecto.
-        if (indice === 0 && anio === anioActual && mes === mesPendiente) continue;
+      const trimestresDelAnio = anio === anioActual ? trimestreActualDemo : 4;
+      for (let trimestre = 1; trimestre <= trimestresDelAnio; trimestre += 1) {
+        // Trimestre deliberadamente sin tarifa en el primer proyecto.
+        if (indice === 0 && anio === anioActual && trimestre === trimestreActualDemo) continue;
 
-        const costo = Number((base + (mes % 4) * 0.035 + (anio - anioAnterior) * 0.06).toFixed(6));
+        const costo = Number(
+          (base + (trimestre - 1) * 0.045 + (anio - anioAnterior) * 0.06).toFixed(6),
+        );
         await execute(
           `INSERT INTO tarifas_kwh
-             (id_proyecto, anio, mes, costo_kwh, moneda, estado, origen, creado_por,
+             (id_proyecto, anio, trimestre, costo_kwh, moneda, estado, origen, creado_por,
               aprobado_por, fecha_aprobacion)
            VALUES (?, ?, ?, ?, 'GTQ', 'APROBADA', 'MANUAL', ?, ?, NOW())`,
-          [idsProyecto[indice], anio, mes, costo, usuarios.coordinador, usuarios.admin],
+          [
+            idsProyecto[indice],
+            anio,
+            trimestre,
+            costo,
+            usuarios.coordinador,
+            usuarios.admin,
+          ],
         );
       }
     }
@@ -352,16 +432,19 @@ export async function sembrarDemostracion(): Promise<void> {
   // --- Produccion -------------------------------------------------------
   const rnd = aleatorio(20260821);
 
+  // La tarifa vigente de un mes es la de SU trimestre calendario.
   const tarifaDe = async (idProyecto: number, anio: number, mes: number) =>
     queryOne<{ id_tarifa: number; costo_kwh: number }>(
       `SELECT id_tarifa, costo_kwh FROM tarifas_kwh
-        WHERE id_proyecto = ? AND anio = ? AND mes = ? AND estado = 'APROBADA'`,
-      [idProyecto, anio, mes],
+        WHERE id_proyecto = ? AND anio = ? AND trimestre = ? AND estado = 'APROBADA'`,
+      [idProyecto, anio, Math.ceil(mes / 3)],
     );
 
   const insertarProduccion = async (parametros: {
     idProyecto: number;
     idInversor: number | null;
+    idGrupo?: number | null;
+    nivel?: 'POR_INVERSOR' | 'GRUPO_CONSOLIDADO' | 'PROYECTO_CONSOLIDADO';
     fecha: string;
     anio: number;
     mes: number;
@@ -375,14 +458,20 @@ export async function sembrarDemostracion(): Promise<void> {
     const tarifa = await tarifaDe(parametros.idProyecto, parametros.anio, parametros.mes);
     await execute(
       `INSERT INTO produccion
-         (id_proyecto, id_inversor, nivel_detalle, fecha, anio, mes, granularidad, kwh,
+         (id_proyecto, id_inversor, id_grupo, nivel_detalle, fecha, anio, mes, granularidad, kwh,
           origen, secuencia, id_sync, id_tarifa, costo_kwh_aplicado, valor_q,
           estado_valorizacion, comentarios, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         parametros.idProyecto,
         parametros.idInversor,
-        parametros.idInversor ? 'POR_INVERSOR' : 'PROYECTO_CONSOLIDADO',
+        parametros.idGrupo ?? null,
+        parametros.nivel ??
+          (parametros.idInversor
+            ? 'POR_INVERSOR'
+            : parametros.idGrupo
+              ? 'GRUPO_CONSOLIDADO'
+              : 'PROYECTO_CONSOLIDADO'),
         parametros.fecha,
         parametros.anio,
         parametros.mes,
@@ -416,6 +505,7 @@ export async function sembrarDemostracion(): Promise<void> {
         await insertarProduccion({
           idProyecto,
           idInversor: inversor.id,
+          idGrupo: idsGrupo[inversor.grupo],
           fecha: `${anio}-${String(mes).padStart(2, '0')}-01`,
           anio,
           mes,
@@ -444,6 +534,34 @@ export async function sembrarDemostracion(): Promise<void> {
         comentarios: mes === 6 ? 'Mantenimiento preventivo programado' : null,
       });
     }
+  }
+
+  // --- Carga manual por falla de conexion -------------------------------
+  // Caso real que el sistema debe soportar: durante una semana el enlace del
+  // "Bloque B" quedo caido y no llegaron datos del fabricante. El operador
+  // completo la energia a mano para que el historico quede integro. Se guarda
+  // como GRUPO_CONSOLIDADO y con granularidad DIARIA, sin inversor asociado.
+  const mesDelHueco = Math.max(1, mesActual - 2);
+  const kwhDiarioDelHueco = redondearKwh(
+    (proyectos[0].baseMensual * 0.2 * ESTACIONALIDAD[mesDelHueco - 1]) / 30,
+  );
+
+  for (let dia = 8; dia <= 14; dia += 1) {
+    await insertarProduccion({
+      idProyecto: idsProyecto[0],
+      idInversor: null,
+      idGrupo: idsGrupo[1],
+      nivel: 'GRUPO_CONSOLIDADO',
+      fecha: `${anioActual}-${String(mesDelHueco).padStart(2, '0')}-${String(dia).padStart(2, '0')}`,
+      anio: anioActual,
+      mes: mesDelHueco,
+      granularidad: 'DIARIA',
+      kwh: kwhDiarioDelHueco,
+      origen: 'MANUAL',
+      comentarios:
+        'Carga manual por falta de datos del fabricante. El enlace del Bloque B ' +
+        'estuvo caido y la energia se tomo del medidor en sitio.',
+    });
   }
 
   // --- Sincronizaciones Huawei simuladas --------------------------------
@@ -565,6 +683,7 @@ export async function sembrarDemostracion(): Promise<void> {
     'Datos de demostracion creados. Todos los registros llevan el prefijo DEMO y son ficticios.',
   );
   logger.info(
-    `Mes deliberadamente SIN tarifa para demostrar la alerta: ${String(mesPendiente).padStart(2, '0')}/${anioActual} en "${proyectos[0].nombre}".`,
+    `Trimestre deliberadamente SIN tarifa para demostrar la alerta trimestral: ` +
+      `T${trimestreActualDemo} de ${anioActual} en "${proyectos[0].nombre}".`,
   );
 }

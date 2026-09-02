@@ -4,8 +4,20 @@
  Retse, S.A. - Uso interno
 
  DOCUMENTO DE ARQUITECTURA COMPLETA DEL PROYECTO
- Version 1.0.0
+ Version 1.1.0
  Estado: implementado, verificado y desplegable
+
+ Cambios de la version 1.1.0 respecto de la 1.0.0
+ ------------------------------------------------
+   1. Jerarquia PROYECTO -> GRUPO -> INVERSOR. Un proyecto se divide en grupos
+      y cada grupo agrupa varios inversores con sus seriales; el grupo declara
+      su cantidad de inversores y si cuenta con banco de baterias.
+   2. La proyeccion anual repartida mes a mes pasa a ser OBLIGATORIA en el alta
+      del proyecto y es la base de la comparativa de cumplimiento.
+   3. Carga manual de rangos completos por grupo, para completar el historico
+      cuando el fabricante no entrega datos por fallas de conexion.
+   4. La tarifa del kWh pasa de MENSUAL a TRIMESTRAL, con su aviso de
+      actualizacion al usuario.
 ================================================================================
 
 
@@ -261,6 +273,7 @@ APPSOLAR/
 |   |   |   +-- usuarios/usuarios.routes.ts
 |   |   |   +-- clientes/clientes.routes.ts
 |   |   |   +-- proyectos/proyectos.routes.ts
+|   |   |   +-- grupos/grupos.routes.ts    Grupos de inversores del proyecto
 |   |   |   +-- tarifas/tarifas.routes.ts
 |   |   |   +-- proyecciones/proyecciones.routes.ts
 |   |   |   +-- inversores/inversores.routes.ts
@@ -287,7 +300,7 @@ APPSOLAR/
 |   |   +-- utils/
 |   |   |   +-- errors.ts            AppError y constructores por tipo
 |   |   |   +-- http.ts              Contrato de respuesta, paginacion, validacion
-|   |   |   +-- fechas.ts            Zona horaria, meses en espanol, periodos
+|   |   |   +-- fechas.ts            Zona horaria, meses, TRIMESTRES y periodos
 |   |   |   +-- numeros.ts           Redondeo documentado y parseo tolerante
 |   |   +-- types/
 |   |       +-- express.d.ts         Extension de Request (usuario, correlacion)
@@ -297,6 +310,7 @@ APPSOLAR/
 |       +-- autenticacion.test.ts
 |       +-- rbac.test.ts
 |       +-- tarifas.test.ts
+|       +-- grupos.test.ts          Jerarquia, proyeccion del alta y carga manual
 |       +-- importaciones.test.ts
 |       +-- huawei.test.ts
 |       +-- analisis.test.ts
@@ -360,6 +374,9 @@ APPSOLAR/
 |   |   +-- 003_energia.sql          Tarifas, proyecciones, cierres, produccion
 |   |   +-- 004_importacion.sql      Historicos, sincronizaciones, reportes
 |   |   +-- 005_catalogos.sql        Datos de referencia obligatorios
+|   |   +-- 006_grupos_y_tarifa_trimestral.sql
+|   |                                Grupos, tercer nivel de detalle, tarifa
+|   |                                trimestral y revalorizacion del historico
 |   +-- seeds/
 |   |   +-- plantilla_historica.csv / .xlsx
 |   |   +-- plantilla_normalizada.csv / .xlsx
@@ -612,35 +629,53 @@ EXTENSIBILIDAD
 
 DIAGRAMA ENTIDAD-RELACION
 
+  Jerarquia del negocio:  CLIENTE -> PROYECTO -> GRUPO -> INVERSOR
+
     +-------------+ 1      * +---------------+ 1      * +------------------+
-    |  clientes   |----------|   proyectos   |----------|    inversores    |
+    |  clientes   |----------|   proyectos   |----------|      grupos      |
     |-------------|          |---------------|          |------------------|
-    | id_cliente  |          | id_proyecto   |          | id_inversor      |
+    | id_cliente  |          | id_proyecto   |          | id_grupo      PK |
     | nombre      |          | id_cliente FK |          | id_proyecto  FK  |
-    | nit      UQ |          | nombre     UQ |          | marca, modelo    |
-    | ubicacion   |          | tipo_proyecto |          | tipo_conexion    |
-    | activo      |          | capacidad_kwp |          | serial_externo   |
-    +-------------+          | activo        |          | id_api       FK  |
-                             +-------+-------+          +---------+--------+
-                                     |                            |
+    | nit      UQ |          | nombre     UQ |          | nombre           |
+    | ubicacion   |          | tipo_proyecto |          | cantidad_inver-  |
+    | activo      |          | capacidad_kwp |          |  sores_declarada |
+    +-------------+          | activo        |          | tiene_banco_bat. |
+                             +-------+-------+          | capacidad_bat_kwh|
+                                     |                  | capacidad_kwp    |
+                                     |                  +---------+--------+
+                                     |                            | 1
+                                     |                            | *
+                                     |                  +---------v--------+
+                                     |                  |    inversores    |
+                                     |                  |------------------|
+                                     |                  | id_inversor   PK |
+                                     |                  | id_proyecto  FK  |
+                                     |                  | id_grupo   FK NN |
+                                     |                  | marca, modelo    |
+                                     |                  | tipo_conexion    |
+                                     |                  | serial_externo   |
+                                     |                  | id_api       FK  |
+                                     |                  +---------+--------+
               +----------------------+------------+               |
               |                      |            |               |
      +--------v--------+  +----------v------+  +--v---------------v--------+
      |  tarifas_kwh    |  |proyecciones_kwh |  |        produccion         |
-     |-----------------|  |-----------------|  |---------------------------|
-     | id_tarifa    PK |  | id_proyeccion PK|  | id_produccion          PK |
-     | id_proyecto  FK |  | id_proyecto  FK |  | id_proyecto            FK |
-     | anio, mes       |  | anio, mes       |  | id_inversor       FK NULL |
-     | costo_kwh       |  | proyeccion_kwh  |  | nivel_detalle             |
-     | estado          |  | estado          |  | fecha, anio, mes          |
-     | clave_vigente UQ|  | clave_vigente UQ|  | granularidad              |
-     +--------+--------+  +-----------------+  | kwh, origen, secuencia    |
-              |                                | id_tarifa              FK |
-              +--------------- valoriza -------| costo_kwh_aplicado        |
-                                               | valor_q                   |
-     +-------------------+                     | estado_valorizacion       |
-     | cierres_mensuales |                     | id_historico           FK |
-     | (proyecto,anio,   |                     | id_sync                FK |
+     |  (TRIMESTRAL)   |  |   (MENSUAL)     |  |---------------------------|
+     |-----------------|  |-----------------|  | id_produccion          PK |
+     | id_tarifa    PK |  | id_proyeccion PK|  | id_proyecto            FK |
+     | id_proyecto  FK |  | id_proyecto  FK |  | id_grupo          FK NULL |
+     | anio            |  | anio, mes       |  | id_inversor       FK NULL |
+     | trimestre 1..4  |  | proyeccion_kwh  |  | nivel_detalle             |
+     | costo_kwh       |  | estado          |  | fecha, anio, mes          |
+     | estado          |  | clave_vigente UQ|  | granularidad              |
+     | clave_vigente UQ|  +-----------------+  | kwh, origen, secuencia    |
+     +--------+--------+                       | id_tarifa              FK |
+              |                                | costo_kwh_aplicado        |
+              +--------------- valoriza -------| valor_q                   |
+                                               | estado_valorizacion       |
+     +-------------------+                     | id_historico           FK |
+     | cierres_mensuales |                     | id_sync                FK |
+     | (proyecto,anio,   |                     | grupo_key       generada  |
      |  mes)          UQ |                     | inversor_key    generada  |
      +-------------------+                     +------------+--------------+
                                                             |
@@ -719,7 +754,10 @@ TABLA CRITICA: produccion
   id_produccion         BIGINT UNSIGNED PK
   id_proyecto           INT UNSIGNED FK       Siempre presente
   id_inversor           INT UNSIGNED FK NULL  Nulo en consolidado de proyecto
-  nivel_detalle         ENUM                  POR_INVERSOR | PROYECTO_CONSOLIDADO
+  id_grupo              INT UNSIGNED FK NULL  Grupo del registro. Nulo solo en el
+                                              consolidado de proyecto
+  nivel_detalle         ENUM                  POR_INVERSOR | GRUPO_CONSOLIDADO |
+                                              PROYECTO_CONSOLIDADO
   fecha                 DATE                  Mensual se ancla al dia 1
   anio, mes             SMALLINT / TINYINT    Redundantes por rendimiento
   granularidad          ENUM                  DIARIA | MENSUAL
@@ -734,7 +772,7 @@ TABLA CRITICA: produccion
 
   REGLA DE UNICIDAD DOCUMENTADA (idempotencia de cargas y sincronizaciones)
 
-    UNIQUE KEY uk_produccion
+    UNIQUE KEY uk_produccion   -- incluye el grupo desde la version 1.1.0
       (id_proyecto, inversor_key, fecha, granularidad, origen, secuencia)
 
     No se usa solo proyecto + anio + mes porque el archivo historico de
@@ -742,8 +780,12 @@ TABLA CRITICA: produccion
 
   RESTRICCION DE COHERENCIA
 
-    CHECK ((nivel_detalle = 'POR_INVERSOR'         AND id_inversor IS NOT NULL)
-        OR (nivel_detalle = 'PROYECTO_CONSOLIDADO' AND id_inversor IS NULL))
+    CHECK ((nivel_detalle = 'POR_INVERSOR'
+              AND id_inversor IS NOT NULL AND id_grupo IS NOT NULL)
+        OR (nivel_detalle = 'GRUPO_CONSOLIDADO'
+              AND id_inversor IS NULL     AND id_grupo IS NOT NULL)
+        OR (nivel_detalle = 'PROYECTO_CONSOLIDADO'
+              AND id_inversor IS NULL     AND id_grupo IS NULL))
 
 UNICIDAD DE TARIFAS Y PROYECCIONES
 
@@ -751,6 +793,7 @@ UNICIDAD DE TARIFAS Y PROYECCIONES
   vigente mediante una columna generada que vale NULL cuando el registro esta
   anulado (MySQL permite multiples NULL en un indice UNIQUE):
 
+    -- tarifas_kwh: la clave vigente es TRIMESTRAL desde la version 1.1.0
     clave_vigente VARCHAR(40) GENERATED ALWAYS AS
         (IF(estado = 'ANULADA', NULL,
             CONCAT(id_proyecto, '-', anio, '-', mes))) STORED,
@@ -771,6 +814,10 @@ INDICES PRINCIPALES
                 ix_prod_inversor_fecha(id_inversor, fecha)
                 ix_prod_valorizacion(estado_valorizacion)
                 ix_prod_nivel(id_proyecto, nivel_detalle, granularidad, fecha)
+                ix_prod_grupo_periodo(id_grupo, anio, mes)
+  grupos:       ix_grupos_proyecto(id_proyecto), ix_grupos_activo(activo)
+  inversores:   ix_inversores_grupo(id_grupo)
+  tarifas_kwh:  ix_tarifas_trimestre(id_proyecto, anio, trimestre, estado)
   tarifas_kwh   ix_tarifas_periodo(id_proyecto, anio, mes, estado)
   auditoria     ix_aud_fecha, ix_aud_usuario, ix_aud_entidad, ix_aud_accion
   historicos    ix_hist_proyecto, ix_hist_estado, ix_hist_fecha, ix_hist_hash
@@ -792,7 +839,7 @@ MIGRACIONES
 ================================================================================
 
 Prefijo comun: /api          Documentacion completa: docs/openapi.json
-Total: 60 rutas, 75 operaciones.
+Total: 66 rutas, 84 operaciones.
 
 AUTENTICACION                                              PERMISO REQUERIDO
   POST   /auth/login                    Iniciar sesion            publico
@@ -825,10 +872,18 @@ PROYECTOS
   PUT    /projects/:id                  Actualizar                proyectos.gestionar
   DELETE /projects/:id                  Eliminar o desactivar     proyectos.gestionar
 
-TARIFAS  (submodulo anidado del proyecto)
-  GET    /projects/:id/rates                    Calendario anual  tarifas.ver
+GRUPOS DE INVERSORES  (submodulo anidado del proyecto)
+  GET    /projects/:id/groups           Listar con avisos         proyectos.ver
+  GET    /projects/:id/groups/:gid      Detalle e inversores      proyectos.ver
+  POST   /projects/:id/groups           Crear                     inversores.gestionar
+  PUT    /projects/:id/groups/:gid      Actualizar                inversores.gestionar
+  DELETE /projects/:id/groups/:gid      Eliminar o desactivar     inversores.gestionar
+
+TARIFAS  (submodulo anidado del proyecto; vigencia TRIMESTRAL)
+  GET    /projects/:id/rates                    Calendario trim.  tarifas.ver
+  GET    /projects/:id/rates/alert              Aviso trimestral  tarifas.ver
   POST   /projects/:id/rates                    Registrar         tarifas.gestionar
-  POST   /projects/:id/rates/copy-previous      Copiar mes ant.   tarifas.gestionar
+  POST   /projects/:id/rates/copy-previous      Copiar trim. ant. tarifas.gestionar
   PUT    /projects/:id/rates/:rateId            Editar borrador   tarifas.gestionar
   POST   /projects/:id/rates/:rateId/approve    Aprobar           tarifas.aprobar
   POST   /projects/:id/rates/:rateId/impact     Analisis impacto  tarifas.recalcular
@@ -857,7 +912,10 @@ PRODUCCION
   GET    /production/timeseries         Serie agregada            produccion.ver
   GET    /production/compare            Comparaciones             produccion.ver
   GET    /production/annual-summary     Resumen anual tipo Excel  produccion.ver
+  GET    /production/by-group           Desglose por grupo        produccion.ver
+  GET    /production/gaps               Dias sin datos por grupo  produccion.ver
   POST   /production                    Registrar manualmente     produccion.registrar
+  POST   /production/group-range        Cargar rango de un grupo  produccion.registrar
   PUT    /production/:id                Corregir con motivo       produccion.corregir
 
 IMPORTACIONES
@@ -1035,12 +1093,21 @@ CONTROLES DE SEGURIDAD IMPLEMENTADOS
  12. FLUJOS FUNCIONALES CLAVE
 ================================================================================
 
-12.1 VALORIZACION MONETARIA
+12.1 VALORIZACION MONETARIA (TARIFA TRIMESTRAL)
+
+    El costo del kWh se pacta por TRIMESTRE CALENDARIO. Los tres meses de un
+    trimestre comparten siempre la misma tarifa.
+
+        I trimestre   enero a marzo
+        II trimestre  abril a junio
+        III trimestre julio a septiembre
+        IV trimestre  octubre a diciembre
 
     registro de produccion (kwh, fecha)
             |
-            +--> se busca la tarifa APROBADA del proyecto para el
-            |    (anio, mes) de la fecha DEL PROPIO REGISTRO
+            +--> trimestre = CEIL(mes / 3) sobre la fecha DEL PROPIO REGISTRO
+            |
+            +--> se busca la tarifa APROBADA del proyecto para (anio, trimestre)
             |
             +-- existe ----> valor_q = kwh x costo_kwh
             |                se guardan id_tarifa y costo_kwh_aplicado
@@ -1050,40 +1117,157 @@ CONTROLES DE SEGURIDAD IMPLEMENTADOS
                              estado = PENDIENTE_DE_TARIFA
                              los kWh se conservan INTACTOS
 
-    En rangos multi-mes se valoriza registro por registro y luego se suma.
-    NUNCA se multiplica el total del rango por una sola tarifa.
+    En rangos multi-trimestre se valoriza registro por registro y luego se
+    suma. NUNCA se multiplica el total del rango por una sola tarifa.
 
     Al aprobar una tarifa faltante se recalculan UNICAMENTE los registros
-    pendientes de ese proyecto y mes; los ya valorizados no se tocan.
+    pendientes de ese proyecto y trimestre (los tres meses); los ya
+    valorizados no se tocan.
+
+12.1.1 AVISO DE ACTUALIZACION TRIMESTRAL
+
+    Como la tarifa caduca cada trimestre, el sistema recuerda al usuario que
+    debe registrarla. El aviso (services/valorizacion.ts ->
+    alertaTarifaTrimestral) se dispara cuando:
+
+      a) el trimestre EN CURSO no tiene tarifa aprobada, o
+      b) faltan N dias o menos para que termine el trimestre y el SIGUIENTE
+         tampoco la tiene.
+
+    N es el parametro de configuracion `tarifa.dias_aviso_trimestre`, con
+    valor inicial 15. El aviso se publica en dos lugares:
+
+      GET /api/dashboard                        -> tarifas.alertaTrimestral
+      GET /api/projects/:id/rates               -> alerta
+      GET /api/projects/:id/rates/alert         -> el aviso por si solo
+
+    En la interfaz aparece como una banda de alerta en el tablero (con enlace
+    a cada proyecto afectado) y en la pantalla de tarifas del proyecto.
 
 12.2 PREVENCION DEL DOBLE CONTEO
 
+    La produccion puede existir en TRES niveles de detalle y dos
+    granularidades. Sumarlos duplicaria la energia.
+
+        PROYECTO  ->  GRUPO  ->  INVERSOR      (de menor a mayor detalle)
+
     SITUACION                                    PREVALECE      SE IGNORA
     ------------------------------------------------------------------------
-    Un mes con detalle por inversor y tambien    POR_INVERSOR   El consolidado
-    consolidado de proyecto                                     de ese mes
+    Un grupo con detalle por inversor y tambien  POR_INVERSOR   El consolidado
+    consolidado de grupo en la MISMA FECHA                      del grupo
+    ------------------------------------------------------------------------
+    Un proyecto con datos a nivel de grupo y     El nivel con   El consolidado
+    ademas consolidado de proyecto en la         grupo          de proyecto
+    MISMA FECHA
     ------------------------------------------------------------------------
     Un inversor con lecturas diarias y ademas    DIARIA         El registro
     un cierre mensual del mismo mes                             MENSUAL
     ------------------------------------------------------------------------
 
-    Implementacion: dos CTEs en services/consultasProduccion.ts
+    Implementacion: tres CTEs en services/consultasProduccion.ts
 
-      WITH niveles AS (
-        SELECT id_proyecto, anio, mes,
-               MAX(nivel_detalle = 'POR_INVERSOR') AS tiene_detalle
+      WITH niveles_grupo AS (
+        SELECT id_proyecto, grupo_key, fecha,
+               MAX(nivel_detalle = 'POR_INVERSOR') AS tiene_inversor
           FROM produccion WHERE activo = 1
-         GROUP BY id_proyecto, anio, mes
+         GROUP BY id_proyecto, grupo_key, fecha
+      ),
+      niveles_proyecto AS (
+        SELECT id_proyecto, fecha,
+               MAX(id_grupo IS NOT NULL) AS tiene_grupo
+          FROM produccion WHERE activo = 1
+         GROUP BY id_proyecto, fecha
       ),
       granularidades AS (
-        SELECT id_proyecto, inversor_key, anio, mes,
+        SELECT id_proyecto, grupo_key, inversor_key, anio, mes,
                MAX(granularidad = 'DIARIA') AS tiene_diaria
           FROM produccion WHERE activo = 1
-         GROUP BY id_proyecto, inversor_key, anio, mes
+         GROUP BY id_proyecto, grupo_key, inversor_key, anio, mes
       )
+
+    DECISION IMPORTANTE: la resolucion de niveles se hace por (grupo, FECHA),
+    nunca por (grupo, MES).
+
+      Si fuera por mes, una carga manual de dias sueltos en un grupo
+      incomunicado se descartaria solo porque ese mismo mes tiene detalle por
+      inversor en OTROS dias, y el dato completado a mano se perderia. Con la
+      resolucion por fecha cada dia conserva su mejor dato disponible.
+
+      La granularidad, en cambio, si se resuelve por mes: un cierre MENSUAL
+      cubre el mes entero por definicion.
 
     El sistema INFORMA siempre estos casos al usuario en el tablero y en las
     consultas; nunca los resuelve en silencio.
+
+12.2.1 CARGA MANUAL DE UN RANGO POR GRUPO
+
+    Requerimiento critico: si un grupo de inversores no cuenta con datos de
+    Huawei para un rango de fechas por problemas de conexion, el operador debe
+    poder cargarlos manualmente para que el historico del proyecto quede
+    completo pese a las fallas.
+
+    Deteccion    GET /api/production/gaps
+                 Compara los dias del periodo contra las lecturas DIARIAS
+                 registradas de cada grupo y devuelve dias esperados, dias con
+                 datos y dias faltantes.
+
+    Carga        POST /api/production/group-range
+                 { id_grupo, desde, hasta, modo, kwh, motivo,
+                   sobrescribir, confirmarMezclaGranularidad }
+
+                 modo = TOTAL_DISTRIBUIDO  el valor es el total del rango y se
+                                           reparte en partes iguales por dia
+                 modo = DIARIO_UNIFORME    el valor es el de CADA dia
+
+                 Cada dia se guarda como GRUPO_CONSOLIDADO, granularidad
+                 DIARIA, origen MANUAL y sin inversor asociado. El motivo
+                 (minimo 10 caracteres) queda en la auditoria y en el
+                 comentario de cada dia.
+
+    Salvaguardas
+
+      Idempotencia      Los dias que ya tienen carga manual se OMITEN y la
+                        respuesta informa cuantos fueron. Solo con
+                        `sobrescribir` se reemplazan.
+
+      Meses cerrados    Ningun mes del rango puede estar cerrado
+                        contablemente.
+
+      Mezcla de         Si el grupo ya tiene un cierre MENSUAL de alguno de
+      granularidades    esos meses, la operacion se RECHAZA con 409: esa cifra
+                        ya cubre el mes completo y agregar dias sueltos
+                        contaria la energia dos veces. Para continuar hay que
+                        enviar `confirmarMezclaGranularidad` de forma expresa.
+
+      Limite            El rango no puede superar 400 dias ni incluir fechas
+                        futuras.
+
+    En la interfaz: Operacion -> Produccion muestra la tarjeta "Grupos con
+    dias sin datos" y el boton "Cargar rango de un grupo", con vista previa
+    de cuantos dias cubre y cuantos kWh corresponden a cada uno.
+
+12.2.2 ALTA DE PROYECTO CON SU ARBOL Y SU PROYECCION
+
+    POST /api/projects crea, en UNA SOLA TRANSACCION:
+
+      1. El proyecto.
+      2. Su proyeccion anual repartida en los 12 meses (OBLIGATORIA).
+      3. Los grupos de inversores declarados (opcionales).
+
+    La proyeccion es la base contra la que se compara despues la generacion
+    real para saber si la planta cumple lo pactado desde el inicio. Por eso se
+    exige en el alta y no despues: un proyecto sin proyeccion no tendria
+    referencia de cumplimiento.
+
+    Los inversores NO se capturan en el alta: se registran despues desde el
+    modulo de inversores, eligiendo siempre su grupo (id_grupo es NOT NULL).
+
+    La interfaz lo presenta como un asistente de tres pasos:
+
+        1 Datos del proyecto   2 Proyeccion anual   3 Grupos de inversores
+
+    El paso 2 ofrece el atajo "repartir un total anual en partes iguales" y
+    despues permite ajustar mes por mes segun la estacionalidad.
 
 12.3 ASISTENTE DE IMPORTACION (7 pasos)
 
@@ -1154,14 +1338,18 @@ CONTROLES DE SEGURIDAD IMPLEMENTADOS
 
     1. El usuario solicita corregir            (requiere tarifas.recalcular)
     2. El sistema EXIGE analizar el impacto primero:
-         registros afectados, kWh afectados, valor anterior, valor nuevo,
-         diferencia y si el periodo esta cerrado
+         trimestre afectado, registros afectados, kWh afectados, valor
+         anterior, valor nuevo, diferencia y que meses del trimestre estan
+         cerrados
     3. El usuario indica un motivo (minimo 10 caracteres) y confirma
-    4. Se recalculan los registros dentro de una transaccion
+    4. Se recalculan los registros de los TRES meses del trimestre dentro de
+       una transaccion
     5. Queda auditado el antes y el despues con el motivo
 
-    Un mes CERRADO no admite la correccion: primero debe reabrirse con motivo
-    y permiso administrativo.
+    El cierre contable sigue siendo MENSUAL aunque la tarifa sea trimestral.
+    Si alguno de los tres meses del trimestre esta CERRADO, la correccion se
+    rechaza: primero debe reabrirse ese mes con motivo y permiso
+    administrativo.
 
 
 ================================================================================
@@ -1169,13 +1357,17 @@ CONTROLES DE SEGURIDAD IMPLEMENTADOS
 ================================================================================
 
   R01  No se puede crear un proyecto sin cliente activo.
-  R02  No se puede crear un inversor sin proyecto activo.
-  R03  No se puede registrar produccion sin proyecto; sin inversor solo como
-       consolidado declarado explicitamente.
-  R04  A lo sumo una tarifa vigente por proyecto, anio y mes. Decimal no
-       negativa, expresada en GTQ/kWh con 6 decimales.
-  R05  valor_q SIEMPRE se deriva de kwh x costo_kwh_aplicado segun el mes de
-       la produccion. Ninguna ruta permite editarlo a mano.
+  R02  No se puede crear un inversor sin proyecto activo NI SIN GRUPO. Todo
+       inversor pertenece a un grupo del mismo proyecto y el grupo debe estar
+       activo.
+  R03  No se puede registrar produccion sin proyecto. Los niveles inferiores
+       (grupo, inversor) se declaran explicitamente; sin ninguno de los dos el
+       registro es consolidado de proyecto.
+  R04  A lo sumo una tarifa vigente por proyecto, anio y TRIMESTRE. Decimal no
+       negativa, expresada en GTQ/kWh con 6 decimales. Los tres meses de un
+       trimestre comparten la misma tarifa.
+  R05  valor_q SIEMPRE se deriva de kwh x costo_kwh_aplicado segun el TRIMESTRE
+       de la produccion. Ninguna ruta permite editarlo a mano.
   R06  Un operativo sin tarifas.gestionar no puede crear ni modificar tarifas.
        Aprobar, recalcular, cerrar y reabrir son permisos diferenciados.
   R07  La ausencia de tarifa no invalida los kWh, pero deja la valorizacion
@@ -1187,8 +1379,10 @@ CONTROLES DE SEGURIDAD IMPLEMENTADOS
        politica explicita elegida por el usuario.
   R11  Varias filas de una planta en el mismo mes NO son duplicados
        automaticos: se analizan por inversor, nivel de detalle, origen y lote.
-  R12  No se suma produccion consolidada de proyecto con el detalle de sus
-       inversores para el mismo periodo.
+  R12  No se suma produccion de dos niveles distintos para la misma fecha: si
+       un grupo tiene detalle por inversor, su consolidado de esa fecha se
+       ignora; si el proyecto tiene datos por grupo, su consolidado de esa
+       fecha se ignora. La resolucion es por (grupo, fecha), nunca por mes.
   R13  Toda importacion es transaccional: no deja lotes parcialmente
        inconsistentes.
   R14  Los errores de una fila no ocultan los registros validos; la carga
@@ -1200,9 +1394,26 @@ CONTROLES DE SEGURIDAD IMPLEMENTADOS
   R17  Los usuarios gerenciales nunca modifican datos.
   R18  No se aceptan kWh negativos ni fechas futuras.
   R19  Un reporte oficial con valor monetario no puede presentarse como
-       completo si existen meses sin tarifa aprobada.
+       completo si existen TRIMESTRES sin tarifa aprobada.
   R20  Nunca se cambian silenciosamente los valores historicos de meses
        cerrados.
+  R21  La proyeccion anual repartida en los 12 meses es OBLIGATORIA al crear
+       el proyecto. Proyecto, proyeccion y grupos se crean en una sola
+       transaccion; si falla cualquiera de los tres, no se crea nada.
+  R22  Un grupo declara cuantos inversores deberia tener. Si lo declarado no
+       coincide con lo registrado, el sistema AVISA pero NO bloquea: el
+       registro de equipo es gradual por naturaleza.
+  R23  Un grupo marcado como SIN banco de baterias no puede declarar capacidad
+       de baterias.
+  R24  La carga manual de un rango por grupo exige motivo (minimo 10
+       caracteres), es idempotente y se rechaza si el grupo ya tiene un cierre
+       MENSUAL de ese mes, salvo confirmacion expresa de la mezcla de
+       granularidades.
+  R25  Un grupo con inversores o produccion asociada no se elimina: se
+       desactiva, para conservar el historico.
+  R26  El sistema avisa al usuario cuando el trimestre en curso no tiene
+       tarifa aprobada, y con anticipacion configurable cuando el siguiente
+       tampoco la tiene.
 
 POLITICA DE REDONDEO DOCUMENTADA
   Energia (kWh)       4 decimales al almacenar
@@ -1232,41 +1443,55 @@ RESULTADO DE LA ULTIMA EJECUCION COMPLETA
   rbac.test.ts                      23     Matriz completa endpoint por
                                            endpoint y rol por rol; coherencia
                                            entre codigo y base de datos
-  tarifas.test.ts                   20     Valorizacion multi-tarifa, mes sin
-                                           tarifa, impacto, recalculo, anulacion,
-                                           cierre y reapertura, correcciones
+  tarifas.test.ts                   26     Valorizacion trimestral, trimestre
+                                           sin tarifa, misma tarifa en los tres
+                                           meses, impacto, recalculo, anulacion,
+                                           cierre y reapertura, correcciones y
+                                           aviso de actualizacion trimestral
+  grupos.test.ts                    19     Jerarquia proyecto/grupo/inversor,
+                                           proyeccion obligatoria del alta,
+                                           coherencia de baterias, deteccion de
+                                           huecos, carga manual por rango,
+                                           idempotencia, guardia de mezcla de
+                                           granularidades y auditoria
   importaciones.test.ts             24     Ambos formatos, validaciones,
                                            decisiones de grupo, duplicados,
                                            doble conteo, rollback, ciclo de vida
   huawei.test.ts                    18     Sincronizacion, idempotencia,
                                            credenciales, IP, limite, timeout,
                                            bloqueo de concurrencia
-  analisis.test.ts                  16     Proyecciones, cumplimiento,
+  analisis.test.ts                  17     Proyecciones, cumplimiento,
                                            agregaciones, comparaciones,
-                                           reportes y exportacion
+                                           cobertura trimestral, reportes y
+                                           exportacion
   seguridad.test.ts                 18     Inyeccion SQL, XSS, formulas CSV,
                                            path traversal, macros, secretos,
                                            cabeceras, CORS, paginacion
   e2e/recorrido.test.ts             11     Recorrido completo del alcance
   --------------------------------------------------------------------------
-  TOTAL BACKEND                    142     Todas correctas
+  TOTAL BACKEND                    168     Todas correctas
   frontend/lib/formato.test.ts       9     Formato de presentacion
   --------------------------------------------------------------------------
-  TOTAL                            151     Todas correctas
+  TOTAL                            177     Todas correctas
 
 RECORRIDO END-TO-END VERIFICADO
    1. El administrador crea usuarios operativo, coordinador y gerencial, y
       cada uno cambia su contrasena temporal en el primer ingreso.
-   2. Crea cliente, dos proyectos con modalidad PPA y EPC, e inversores.
-   3. Registra y aprueba la proyeccion mensual del proyecto.
-   4. El coordinador registra las tarifas; el administrador las aprueba.
+   2. Crea cliente y dos proyectos con modalidad PPA y EPC. En el alta del PPA
+      captura ademas su PROYECCION ANUAL de 12 meses y su GRUPO de inversores;
+      se comprueba que un proyecto sin proyeccion completa se rechaza.
+   3. Registra los inversores dentro de su grupo, y se comprueba que un
+      inversor sin grupo se rechaza.
+   4. El coordinador registra las tarifas TRIMESTRALES; el administrador las
+      aprueba. Se verifica que el calendario tiene 4 trimestres y que la
+      periodicidad declarada es TRIMESTRAL.
    5. El operativo carga el formato historico del Excel, con dos filas del
       mismo mes y una fila con error, resolviendo la decision y aceptando la
       carga parcial.
-   6. Ejecuta una sincronizacion Huawei simulada y la repite para comprobar
-      la idempotencia.
-   7. El sistema aplica la tarifa de cada periodo y calcula el valor en
-      quetzales sin perder ni duplicar informacion.
+   6. Ejecuta una sincronizacion Huawei simulada sobre dos trimestres y la
+      repite para comprobar la idempotencia.
+   7. El sistema aplica la tarifa del TRIMESTRE de cada registro y calcula el
+      valor en quetzales sin perder ni duplicar informacion.
    8. El gerencial compara proyeccion, anio anterior y anio seleccionado,
       consulta el cumplimiento y genera un reporte imprimible en PDF.
    9. Se comprueba que el gerencial no puede modificar ningun dato.
@@ -1528,29 +1753,29 @@ DEUDA TECNICA SUGERIDA PARA PROXIMAS VERSIONES
 
   AREA                       ARCHIVOS      LINEAS
   --------------------------------------------------------------------------
-  backend/src                     43       10,423
-  backend/tests                   10        3,473
-  frontend/src                    30        9,829
+  backend/src                     44       11,978
+  backend/tests                   11        4,248
+  frontend/src                    30       11,472
   python-service/app               6          786
-  database                        12          959
-  docs                             9        2,012
+  database                        13        1,212
+  docs                             9        5,144
   infra                           11          481
   --------------------------------------------------------------------------
-  TOTAL VERSIONADO               136       ~36,000
+  TOTAL VERSIONADO               141       ~41,000
 
   COMPONENTES
   --------------------------------------------------------------------------
-  Tablas de base de datos                        22 (+1 de control)
-  Migraciones                                     5
+  Tablas de base de datos                        23 (+1 de control)
+  Migraciones                                     6
   Permisos                                       33
   Roles                                           3
-  Rutas del API                                  60
-  Operaciones documentadas en OpenAPI            75
-  Modulos de dominio del backend                 13
+  Rutas del API                                  66
+  Operaciones documentadas en OpenAPI            84
+  Modulos de dominio del backend                 14
   Servicios transversales                        11
   Pantallas del frontend                         16
   Componentes reutilizables                       5
-  Pruebas automatizadas                         151
+  Pruebas automatizadas                         177
   Documentos de documentacion                     9 + README + este archivo
   Unidades de infraestructura                    11
 
@@ -1567,8 +1792,27 @@ DEUDA TECNICA SUGERIDA PARA PROXIMAS VERSIONES
   EPC                     Engineering, Procurement and Construction.
   SmartPVMS               Plataforma de gestion fotovoltaica de Huawei
                           (FusionSolar). Su API se llama northbound.
-  Nivel de detalle        POR_INVERSOR o PROYECTO_CONSOLIDADO. Determina si un
-                          registro es atribuible a un equipo concreto.
+  Grupo                   Nivel intermedio de la jerarquia del negocio. Un
+                          proyecto se divide en grupos y cada grupo agrupa
+                          varios inversores con sus seriales. Declara cuantos
+                          inversores debe tener y si cuenta con banco de
+                          baterias. Es la unidad sobre la que se carga
+                          produccion manualmente cuando falla la conexion con
+                          el fabricante.
+  Banco de baterias       Sistema de almacenamiento asociado a un grupo. Se
+                          declara con su capacidad en kWh.
+  Nivel de detalle        POR_INVERSOR, GRUPO_CONSOLIDADO o
+                          PROYECTO_CONSOLIDADO. Determina a que altura de la
+                          jerarquia es atribuible un registro.
+  Trimestre               Trimestre calendario (I: ene-mar, II: abr-jun,
+                          III: jul-sep, IV: oct-dic). Vigencia de la tarifa
+                          del kWh: sus tres meses comparten el mismo costo.
+  Proyeccion              Compromiso de generacion anual repartido mes a mes.
+                          Se captura al crear el proyecto y es la base de la
+                          comparativa de cumplimiento.
+  Hueco de datos          Dias de un periodo en los que un grupo no tiene
+                          lectura diaria registrada, normalmente por fallas de
+                          conexion con la plataforma del fabricante.
   Granularidad            DIARIA o MENSUAL. Frecuencia del registro.
   Secuencia               Numero que distingue componentes legitimos de un
                           mismo periodo sin tratarlos como duplicados.

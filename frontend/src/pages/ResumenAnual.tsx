@@ -10,6 +10,8 @@ import { anioActual, kwh, numero, porcentaje, quetzales, tarifa } from '../lib/f
 interface FilaAnual {
   mes: number;
   mesNombre: string;
+  /** Trimestre calendario al que pertenece el mes (vigencia de la tarifa). */
+  trimestre: number;
   proyeccion_kwh: number | null;
   generacion_anio_anterior: number;
   cumplimiento_anio_anterior: number | null;
@@ -199,6 +201,7 @@ export function PaginaResumenAnual() {
                 <thead>
                   <tr>
                     <th scope="col">Mes</th>
+                    <th scope="col">Trimestre</th>
                     <th scope="col" className="num">Proyeccion kWh</th>
                     <th scope="col" className="num">Generacion {anio - 1}</th>
                     <th scope="col" className="num">% cumpl. {anio - 1}</th>
@@ -222,6 +225,11 @@ export function PaginaResumenAnual() {
                       <th scope="row" style={{ position: 'static', background: 'transparent', borderBottom: '1px solid var(--gris-200)' }}>
                         {fila.mesNombre}
                       </th>
+                      <td>
+                        <span className="etiqueta etiqueta--gris">
+                          {['I', 'II', 'III', 'IV'][fila.trimestre - 1]} trimestre
+                        </span>
+                      </td>
                       <td className="num">
                         {fila.proyeccion_kwh === null ? (
                           <span style={{ color: 'var(--texto-suave)' }}>Sin proyeccion</span>
@@ -268,6 +276,7 @@ export function PaginaResumenAnual() {
                 <tfoot>
                   <tr style={{ fontWeight: 700, background: 'var(--azul-050)' }}>
                     <th scope="row" style={{ position: 'static' }}>Total anual</th>
+                    <td>—</td>
                     <td className="num">{numero(datos.totales.proyeccion_kwh)}</td>
                     <td className="num">{numero(datos.totales.generacion_anio_anterior)}</td>
                     <td className="num">{porcentaje(datos.totales.cumplimiento_anio_anterior)}</td>
@@ -281,9 +290,10 @@ export function PaginaResumenAnual() {
               </table>
             </div>
             <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: '0.7rem' }}>
-              La tarifa mostrada es la tarifa mensual APROBADA del proyecto. El valor producido se calcula
-              registro por registro con la tarifa de su propio mes y luego se suma: nunca se multiplica el
-              total del anio por una sola tarifa.
+              La tarifa mostrada es la tarifa APROBADA del <strong>trimestre</strong> al que pertenece cada
+              mes: los tres meses de un trimestre comparten el mismo costo por kWh. El valor producido se
+              calcula registro por registro con la tarifa de su propio trimestre y luego se suma: nunca se
+              multiplica el total del anio por una sola tarifa.
               {proyectoSeleccionado ? ` Tarifa de referencia: ${tarifa(datos.filas.find((f) => f.tarifa_q_kwh !== null)?.tarifa_q_kwh ?? null)}.` : ''}
             </p>
           </section>
