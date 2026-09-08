@@ -3,9 +3,9 @@
 Dos modos:
 
 * ``MOCK``  -> genera datos SIMULADOS deterministas. Se usa cuando aun no hay
-  credenciales o la IP publica no ha sido autorizada por el fabricante.
-  Toda respuesta viene marcada como simulada para que el backend y la interfaz
-  puedan advertirlo y nunca se mezcle con datos reales sin confirmacion.
+  credenciales del fabricante. Toda respuesta viene marcada como simulada
+  para que el backend y la interfaz puedan advertirlo y nunca se mezcle con
+  datos reales sin confirmacion.
 
 * ``REAL``  -> consume la API oficial autorizada:
       POST /thirdData/login                 (autenticacion, devuelve XSRF-TOKEN)
@@ -14,8 +14,17 @@ Dos modos:
       POST /thirdData/getDevKpiDay          (produccion diaria por dispositivo)
       POST /thirdData/getKpiStationMonth    (produccion mensual por estacion)
 
-  Requiere ``HUAWEI_USERNAME`` y ``HUAWEI_SYSTEM_CODE`` en el entorno y que la
-  IP publica del VPS este registrada por Huawei.
+  Requiere ``HUAWEI_USERNAME`` y ``HUAWEI_SYSTEM_CODE`` en el entorno (una
+  cuenta Northbound creada por un Administrador de la Empresa en el portal
+  FusionSolar, distinta del login normal).
+
+  Sobre la restriccion de IP: las guias de alta de cuenta Northbound
+  vigentes no piden registrar una IP publica como paso obligatorio, asi que
+  no se debe asumir que hace falta gestionarla de antemano. Sin embargo el
+  codigo 20008 (IP_NO_AUTORIZADA, mas abajo) existe en el protocolo, por lo
+  que algunas cuentas si podrian tenerla restringida. Si REAL falla con ese
+  codigo, es la senal de pedirle al administrador de FusionSolar que
+  autorice la IP publica del servidor donde corre este servicio.
 """
 
 from __future__ import annotations
@@ -48,6 +57,7 @@ CODIGOS_HUAWEI = {
     305: ("CREDENCIALES_INVALIDAS", "No autenticado ante SmartPVMS."),
     401: ("CREDENCIALES_INVALIDAS", "Credenciales rechazadas por SmartPVMS."),
     407: ("LIMITE_API", "Frecuencia de consulta excedida."),
+    20618: ("LIMITE_API", "Se alcanzo el limite diario de llamadas permitidas por usuario."),
 }
 
 # Perfil de irradiacion mensual usado por el generador simulado (Guatemala).
