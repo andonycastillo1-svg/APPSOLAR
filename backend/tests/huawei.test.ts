@@ -335,13 +335,30 @@ describe('Sincronizacion Huawei SmartPVMS', () => {
     expect(respuesta.body.meta.advertenciaMock).toContain('SIMULADO');
   });
 
-  it('exige la IP autorizada antes de activar el modo real', async () => {
+  it('permite activar el modo real sin exigir una IP autorizada de antemano', async () => {
+    // Las guias vigentes de alta de una cuenta Northbound de FusionSolar no
+    // piden registrar una IP publica como paso obligatorio, asi que el modo
+    // REAL no debe bloquearse por su ausencia. El campo sigue siendo
+    // opcional: solo importa si Huawei responde el error 20008.
     const respuesta = await comoUsuario(admin)
       .put(`/api/integrations/huawei/config/${datos.idApi}`)
       .send({ modo: 'REAL' })
-      .expect(409);
+      .expect(200);
 
-    expect(respuesta.body.error.mensaje).toContain('IP publica autorizada');
+    expect(respuesta.body.datos.mensaje).toContain('actualizada');
+
+    const api = await queryOne<{ modo: string; ip_autorizada: string | null }>(
+      'SELECT modo, ip_autorizada FROM apis_fabricante WHERE id_api = ?',
+      [datos.idApi],
+    );
+    expect(api?.modo).toBe('REAL');
+    expect(api?.ip_autorizada).toBeNull();
+
+    // Se restaura a MOCK para no afectar el resto de las pruebas del archivo.
+    await comoUsuario(admin)
+      .put(`/api/integrations/huawei/config/${datos.idApi}`)
+      .send({ modo: 'MOCK' })
+      .expect(200);
   });
 
   it('prueba la conexion y guarda el resultado en la configuracion', async () => {
