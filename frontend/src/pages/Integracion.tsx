@@ -544,9 +544,9 @@ export function PaginaIntegracion() {
               onChange={(e) => setEditar({ ...editar, endpoint: e.target.value })}
             />
             <CampoTexto
-              etiqueta="IP publica autorizada"
+              etiqueta="IP publica autorizada (opcional)"
               value={editar.ip_autorizada ?? ''}
-              ayuda="Debe coincidir con la IP registrada ante el fabricante."
+              ayuda="No suele ser obligatoria para activar el modo real. Registrela solo si Huawei rechaza la conexion con el error 'IP no autorizada'."
               onChange={(e) => setEditar({ ...editar, ip_autorizada: e.target.value })}
             />
             <CampoTexto
