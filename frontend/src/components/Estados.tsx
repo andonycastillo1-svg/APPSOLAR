@@ -156,6 +156,18 @@ export function Modal({
 }) {
   const contenedor = useRef<HTMLDivElement>(null);
 
+  // `alCerrar` normalmente es una funcion nueva en cada render del llamador
+  // (p. ej. `alCerrar={() => setFormulario(null)}`). Si el efecto de abajo
+  // dependiera de ella, cada tecla escrita en un campo del modal (que
+  // actualiza estado y vuelve a renderizar) reiniciaria el efecto: le
+  // devolveria el foco al elemento anterior y luego al primer campo del
+  // modal, dejando escribir una sola letra a la vez. La referencia evita
+  // ese reinicio sin depender de que el llamador memorice la funcion.
+  const alCerrarRef = useRef(alCerrar);
+  useEffect(() => {
+    alCerrarRef.current = alCerrar;
+  }, [alCerrar]);
+
   useEffect(() => {
     const anterior = document.activeElement as HTMLElement | null;
     const primero = contenedor.current?.querySelector<HTMLElement>(
@@ -166,7 +178,7 @@ export function Modal({
     const alPresionar = (evento: KeyboardEvent) => {
       if (evento.key === 'Escape') {
         evento.stopPropagation();
-        alCerrar();
+        alCerrarRef.current();
         return;
       }
       if (evento.key !== 'Tab' || !contenedor.current) return;
@@ -197,7 +209,9 @@ export function Modal({
       document.body.style.overflow = '';
       anterior?.focus();
     };
-  }, [alCerrar]);
+    // Se ejecuta solo al abrir y al cerrar el modal (ver alCerrarRef arriba).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div
