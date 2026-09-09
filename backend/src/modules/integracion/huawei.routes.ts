@@ -78,10 +78,11 @@ huaweiRouter.get(
           ? 'El sistema opera en modo SIMULADO. Los datos generados son ficticios y estan marcados como tales.'
           : null,
       pasosParaActivarReal: [
-        'Registrar la IP publica del VPS ante Huawei y esperar su autorizacion.',
+        'Crear una cuenta Northbound en el portal FusionSolar (Sistema > Gestion de la Empresa > Gestion Northbound).',
         'Definir HUAWEI_USERNAME y HUAWEI_SYSTEM_CODE como variables de entorno del servicio Python.',
         'Cambiar HUAWEI_MODE=real y el modo de la configuracion a REAL.',
         'Ejecutar "Probar conexion" antes de la primera sincronizacion.',
+        'Solo si Huawei rechaza la conexion con el error "IP no autorizada": pedir al administrador de FusionSolar que autorice la IP publica de este servidor.',
       ],
     });
   }),
@@ -101,11 +102,11 @@ huaweiRouter.put(
     const actual = await queryOne('SELECT * FROM apis_fabricante WHERE id_api = ?', [id]);
     if (!actual) throw errores.noEncontrado('la configuracion de integracion');
 
-    if (datos.modo === 'REAL' && !env.huawei.authorizedIp && !datos.ip_autorizada) {
-      throw errores.reglaNegocio(
-        'Para activar el modo REAL debe registrar la IP publica autorizada por Huawei.',
-      );
-    }
+    // NOTA: las guias vigentes de alta de una cuenta Northbound de FusionSolar
+    // no piden registrar de antemano una IP publica autorizada, asi que ya
+    // no se bloquea activar el modo REAL por no tenerla. El campo se deja
+    // como dato opcional/informativo: solo importa si Huawei responde el
+    // error 20008 (IP_NO_AUTORIZADA) para una cuenta en particular.
 
     const mapa: Record<string, unknown> = {
       nombre: datos.nombre,
