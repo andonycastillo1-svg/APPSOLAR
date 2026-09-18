@@ -462,4 +462,148 @@ describe('Grupos de inversores, proyeccion del alta y carga manual por rango', (
       expect(consolidados[0].comentarios).toContain('Carga manual por falta de datos del fabricante');
     });
   });
+
+  // ===========================================================================
+  // Lotes de paneles: soportan generaciones de paneles distintas en un grupo
+  // ===========================================================================
+  describe('lotes de paneles de un grupo (distintas generaciones de potencia)', () => {
+    it('registra un lote y calcula la capacidad en kWp', async () => {
+      const respuesta = await comoUsuario(operativo)
+        .post(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels`)
+        .send({
+          cantidad: 1000,
+          potencia_wp: 440,
+          marca: 'Trina Solar',
+          modelo: 'TSM-440',
+          fecha_instalacion: '2020-01-15',
+        })
+        .expect(201);
+
+      expect(respuesta.body.datos.capacidad_kwp).toBe(440);
+      expect(respuesta.body.datos.mensaje).toContain('1000 panel(es) de 440 Wp');
+    });
+
+    it('suma varios lotes de distinta potencia en el total del grupo', async () => {
+      // Ampliacion posterior con paneles mas potentes: mismo grupo, otra
+      // generacion de paneles. El total NUNCA se recalcula a mano.
+      await comoUsuario(operativo)
+        .post(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels`)
+        .send({ cantidad: 500, potencia_wp: 640, fecha_instalacion: '2025-06-01' })
+        .expect(201);
+
+      const detalle = await comoUsuario(gerencial)
+        .get(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}`)
+        .expect(200);
+
+      // 1000 x 440 + 500 x 640 = 440000 + 320000 = 760000 Wp = 760 kWp
+      expect(Number(detalle.body.datos.cantidad_paneles)).toBe(1500);
+      expect(Number(detalle.body.datos.capacidad_paneles_kwp)).toBeCloseTo(760, 4);
+      expect(detalle.body.datos.paneles).toHaveLength(2);
+
+      const listado = await comoUsuario(gerencial)
+        .get(`/api/projects/${datos.idProyecto}/groups`)
+        .expect(200);
+      const fila = listado.body.datos.find(
+        (g: { id_grupo: number }) => g.id_grupo === datos.idGrupo,
+      );
+      expect(Number(fila.cantidad_paneles)).toBe(1500);
+      expect(Number(fila.capacidad_paneles_kwp)).toBeCloseTo(760, 4);
+      expect(Number(listado.body.meta.totales.capacidadPanelesKwp)).toBeGreaterThanOrEqual(760);
+    });
+
+    it('el total del proyecto es la suma de los lotes de TODOS sus grupos, nunca un dato propio', async () => {
+      const otroGrupo = await comoUsuario(operativo)
+        .post(`/api/projects/${datos.idProyecto}/groups`)
+        .send({ nombre: 'Grupo con paneles propios' })
+        .expect(201);
+
+      await comoUsuario(operativo)
+        .post(`/api/projects/${datos.idProyecto}/groups/${otroGrupo.body.datos.id_grupo}/panels`)
+        .send({ cantidad: 100, potencia_wp: 640 })
+        .expect(201);
+
+      const detalleProyecto = await comoUsuario(gerencial)
+        .get(`/api/projects/${datos.idProyecto}`)
+        .expect(200);
+
+      // 760 kWp del grupo principal + 100 x 640 Wp = 64 kWp del grupo nuevo.
+      expect(Number(detalleProyecto.body.datos.panelesProyecto.capacidadPanelesKwp)).toBeCloseTo(
+        824,
+        4,
+      );
+      expect(Number(detalleProyecto.body.datos.panelesProyecto.cantidadPaneles)).toBe(1600);
+    });
+
+    it('edita un lote y el total se recalcula automaticamente', async () => {
+      const lotes = await comoUsuario(operativo)
+        .get(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels`)
+        .expect(200);
+      const loteViejo = lotes.body.datos.find((l: { potencia_wp: string }) => Number(l.potencia_wp) === 440);
+
+      await comoUsuario(operativo)
+        .put(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels/${loteViejo.id_lote}`)
+        .send({ cantidad: 900 })
+        .expect(200);
+
+      const detalle = await comoUsuario(gerencial)
+        .get(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}`)
+        .expect(200);
+      // 900 x 440 + 500 x 640 = 396000 + 320000 = 716000 Wp = 716 kWp
+      expect(Number(detalle.body.datos.capacidad_paneles_kwp)).toBeCloseTo(716, 4);
+    });
+
+    it('retira (desactiva) un lote sin borrarlo del historico', async () => {
+      const lotes = await comoUsuario(operativo)
+        .get(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels`)
+        .expect(200);
+      const loteNuevo = lotes.body.datos.find((l: { potencia_wp: string }) => Number(l.potencia_wp) === 640);
+
+      const eliminado = await comoUsuario(operativo)
+        .delete(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels/${loteNuevo.id_lote}`)
+        .expect(200);
+      expect(eliminado.body.datos.mensaje).toContain('retirado');
+
+      const detalle = await comoUsuario(gerencial)
+        .get(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}`)
+        .expect(200);
+      // Solo queda el lote viejo (900 x 440 = 396 kWp); el retirado no cuenta.
+      expect(Number(detalle.body.datos.capacidad_paneles_kwp)).toBeCloseTo(396, 4);
+      expect(detalle.body.datos.paneles).toHaveLength(1);
+    });
+
+    it('rechaza cantidad o potencia invalidas y fechas futuras', async () => {
+      await comoUsuario(operativo)
+        .post(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels`)
+        .send({ cantidad: 0, potencia_wp: 440 })
+        .expect(422);
+
+      await comoUsuario(operativo)
+        .post(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels`)
+        .send({ cantidad: 10, potencia_wp: 0 })
+        .expect(422);
+
+      await comoUsuario(operativo)
+        .post(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels`)
+        .send({ cantidad: 10, potencia_wp: 440, fecha_instalacion: '2099-01-01' })
+        .expect(422);
+    });
+
+    it('un usuario gerencial solo consulta, nunca gestiona lotes de paneles', async () => {
+      await comoUsuario(gerencial)
+        .get(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels`)
+        .expect(200);
+
+      await comoUsuario(gerencial)
+        .post(`/api/projects/${datos.idProyecto}/groups/${datos.idGrupo}/panels`)
+        .send({ cantidad: 10, potencia_wp: 440 })
+        .expect(403);
+    });
+
+    it('rechaza un lote sobre un grupo que no existe o de otro proyecto', async () => {
+      await comoUsuario(operativo)
+        .post(`/api/projects/${datos.idProyecto}/groups/999999/panels`)
+        .send({ cantidad: 10, potencia_wp: 440 })
+        .expect(404);
+    });
+  });
 });
