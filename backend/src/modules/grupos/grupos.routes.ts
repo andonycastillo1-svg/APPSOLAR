@@ -6,6 +6,7 @@ import { asyncHandler, creado, ok, validarCuerpo } from '../../utils/http';
 import { requierePermiso } from '../../middleware/autenticacion';
 import { PERMISOS } from '../../config/permisos';
 import { auditarDesdeRequest } from '../../services/auditoria';
+import { hoyISO } from '../../utils/fechas';
 
 /**
  * Grupos de inversores.
@@ -16,6 +17,14 @@ import { auditarDesdeRequest } from '../../services/auditoria';
  * El grupo declara cuantos inversores deberia tener y si cuenta con banco de
  * baterias, y es la unidad sobre la que se carga produccion manualmente
  * cuando la conexion con el fabricante falla.
+ *
+ * Tambien es la unidad donde se declaran los LOTES DE PANELES instalados
+ * (cantidad + potencia unitaria en Wp): una instalacion con varios anios
+ * suele tener paneles de distinta generacion en el mismo grupo (ej. una
+ * ampliacion con paneles mas potentes). La cantidad de paneles y la
+ * potencia instalada del grupo se calculan sumando sus lotes activos, y la
+ * del proyecto sumando, a su vez, todos sus grupos -- nunca se captura por
+ * separado a nivel de proyecto.
  *
  * Montado en `/api/projects/:projectId/groups` (requiere `mergeParams`).
  *
@@ -50,11 +59,60 @@ const esquemaGrupo = z.object({
   activo: z.boolean().default(true),
 });
 
+/**
+ * Lote de paneles de un grupo: una cantidad de paneles con la misma
+ * potencia unitaria (Wp). Existen para representar instalaciones con
+ * generaciones de paneles distintas dentro de un mismo grupo -- por
+ * ejemplo, paneles originales de 440 Wp mas una ampliacion posterior con
+ * paneles de 640 Wp. La cantidad total de paneles y la potencia instalada
+ * en kWp de un grupo (y de un proyecto) se OBTIENEN SUMANDO sus lotes
+ * activos; no se guardan como columna redundante.
+ */
+const esquemaLotePaneles = z.object({
+  cantidad: z.coerce
+    .number()
+    .int()
+    .positive('Indique cuantos paneles tiene este lote.')
+    .max(100000),
+  potencia_wp: z.coerce
+    .number()
+    .positive('Indique la potencia de cada panel en vatios (Wp).')
+    .max(10000),
+  marca: z.string().trim().max(80).optional().nullable(),
+  modelo: z.string().trim().max(120).optional().nullable(),
+  fecha_instalacion: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use el formato aaaa-mm-dd.')
+    .optional()
+    .nullable(),
+  observaciones: z.string().trim().max(500).optional().nullable(),
+  activo: z.boolean().default(true),
+});
+
+/** Subconsulta reutilizable: totales de paneles activos de un grupo. */
+const SUBCONSULTA_PANELES = `
+  (SELECT COALESCE(SUM(pl.cantidad), 0) FROM paneles_grupo pl
+    WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1) AS cantidad_paneles,
+  (SELECT COALESCE(SUM(pl.cantidad * pl.potencia_wp), 0) / 1000 FROM paneles_grupo pl
+    WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1) AS capacidad_paneles_kwp`;
+
 async function proyectoDe(req: { params: Record<string, string> }): Promise<number> {
   const id = Number(req.params.projectId);
   if (!Number.isInteger(id) || id <= 0) throw errores.solicitudInvalida('Proyecto invalido.');
   const existe = await queryOne('SELECT id_proyecto FROM proyectos WHERE id_proyecto = ?', [id]);
   if (!existe) throw errores.noEncontrado('el proyecto indicado');
+  return id;
+}
+
+/** Confirma que el grupo exista y pertenezca al proyecto de la ruta. */
+async function grupoDe(idProyecto: number, req: { params: Record<string, string> }): Promise<number> {
+  const id = Number(req.params.groupId);
+  if (!Number.isInteger(id) || id <= 0) throw errores.solicitudInvalida('Grupo invalido.');
+  const existe = await queryOne('SELECT id_grupo FROM grupos WHERE id_grupo = ? AND id_proyecto = ?', [
+    id,
+    idProyecto,
+  ]);
+  if (!existe) throw errores.noEncontrado('el grupo indicado');
   return id;
 }
 
@@ -85,6 +143,8 @@ gruposRouter.get(
       tiene_banco_baterias: number;
       capacidad_baterias_kwh: number | null;
       capacidad_kwp: number | null;
+      cantidad_paneles: number;
+      capacidad_paneles_kwp: number;
       ubicacion: string | null;
       observaciones: string | null;
       activo: number;
@@ -97,7 +157,8 @@ gruposRouter.get(
               (SELECT COALESCE(SUM(p.kwh), 0) FROM produccion p
                 WHERE p.id_grupo = g.id_grupo AND p.activo = 1) AS kwh_total,
               (SELECT MAX(p.fecha) FROM produccion p
-                WHERE p.id_grupo = g.id_grupo AND p.activo = 1) AS ultima_produccion
+                WHERE p.id_grupo = g.id_grupo AND p.activo = 1) AS ultima_produccion,
+              ${SUBCONSULTA_PANELES}
          FROM grupos g
         WHERE g.id_proyecto = ?
         ORDER BY g.nombre`,
@@ -133,6 +194,13 @@ gruposRouter.get(
           (a, g) => a + Number(g.capacidad_baterias_kwh ?? 0),
           0,
         ),
+        // El total de paneles del PROYECTO nunca se captura por separado:
+        // siempre es la suma de los lotes de todos sus grupos.
+        cantidadPaneles: conAvisos.reduce((a, g) => a + Number(g.cantidad_paneles ?? 0), 0),
+        capacidadPanelesKwp: conAvisos.reduce(
+          (a, g) => a + Number(g.capacidad_paneles_kwp ?? 0),
+          0,
+        ),
       },
     });
   }),
@@ -149,7 +217,8 @@ gruposRouter.get(
     const idGrupo = Number(req.params.groupId);
 
     const grupo = await queryOne(
-      'SELECT * FROM grupos WHERE id_grupo = ? AND id_proyecto = ?',
+      `SELECT g.*, ${SUBCONSULTA_PANELES}
+         FROM grupos g WHERE g.id_grupo = ? AND g.id_proyecto = ?`,
       [idGrupo, idProyecto],
     );
     if (!grupo) throw errores.noEncontrado('el grupo indicado');
@@ -158,6 +227,12 @@ gruposRouter.get(
       `SELECT i.*, (SELECT MAX(p.fecha) FROM produccion p
                      WHERE p.id_inversor = i.id_inversor AND p.activo = 1) AS ultima_produccion
          FROM inversores i WHERE i.id_grupo = ? ORDER BY i.marca, i.modelo`,
+      [idGrupo],
+    );
+
+    const paneles = await query(
+      `SELECT * FROM paneles_grupo WHERE id_grupo = ? AND activo = 1
+        ORDER BY fecha_instalacion IS NULL, fecha_instalacion, id_lote`,
       [idGrupo],
     );
 
@@ -170,7 +245,7 @@ gruposRouter.get(
       [idGrupo],
     );
 
-    ok(res, { ...grupo, inversores, produccionMensual });
+    ok(res, { ...grupo, inversores, paneles, produccionMensual });
   }),
 );
 
@@ -342,5 +417,180 @@ gruposRouter.delete(
       antes: grupo,
     });
     ok(res, { eliminado: true, mensaje: 'Grupo eliminado correctamente.' });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Lotes de paneles del grupo
+//
+// Cada lote representa una cantidad de paneles con la misma potencia
+// unitaria. Un grupo puede tener varios lotes (instalacion original mas
+// ampliaciones posteriores con paneles de otra generacion). El total de
+// paneles y la potencia instalada en kWp se calculan SUMANDO los lotes
+// activos, tanto a nivel de grupo como -- sumando todos sus grupos -- a
+// nivel de proyecto (ver GET /projects/:projectId/groups y GET /projects/:id).
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// GET /projects/:projectId/groups/:groupId/panels
+// ---------------------------------------------------------------------------
+gruposRouter.get(
+  '/:groupId/panels',
+  requierePermiso(PERMISOS.PROYECTOS_VER),
+  asyncHandler(async (req, res) => {
+    const idProyecto = await proyectoDe(req);
+    const idGrupo = await grupoDe(idProyecto, req);
+
+    const lotes = await query(
+      `SELECT * FROM paneles_grupo WHERE id_grupo = ? AND activo = 1
+        ORDER BY fecha_instalacion IS NULL, fecha_instalacion, id_lote`,
+      [idGrupo],
+    );
+
+    ok(res, lotes, {
+      totales: {
+        lotes: lotes.length,
+        cantidadPaneles: lotes.reduce((a, l) => a + Number(l.cantidad), 0),
+        capacidadKwp: lotes.reduce((a, l) => a + (Number(l.cantidad) * Number(l.potencia_wp)) / 1000, 0),
+      },
+    });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// POST /projects/:projectId/groups/:groupId/panels
+// ---------------------------------------------------------------------------
+gruposRouter.post(
+  '/:groupId/panels',
+  requierePermiso(PERMISOS.INVERSORES_GESTIONAR),
+  validarCuerpo(esquemaLotePaneles),
+  asyncHandler(async (req, res) => {
+    const idProyecto = await proyectoDe(req);
+    const idGrupo = await grupoDe(idProyecto, req);
+    const datos = req.body as z.infer<typeof esquemaLotePaneles>;
+
+    if (datos.fecha_instalacion && datos.fecha_instalacion > hoyISO()) {
+      throw errores.validacion('La fecha de instalacion no puede ser futura.');
+    }
+
+    const resultado = await execute(
+      `INSERT INTO paneles_grupo
+         (id_grupo, cantidad, potencia_wp, marca, modelo, fecha_instalacion,
+          observaciones, activo, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        idGrupo,
+        datos.cantidad,
+        datos.potencia_wp,
+        datos.marca || null,
+        datos.modelo || null,
+        datos.fecha_instalacion || null,
+        datos.observaciones || null,
+        datos.activo ? 1 : 0,
+        req.usuario!.id_usuario,
+      ],
+    );
+
+    await auditarDesdeRequest(req, {
+      accion: 'LOTE_PANELES_CREADO',
+      entidad: 'paneles_grupo',
+      idEntidad: resultado.insertId,
+      despues: { ...datos, id_grupo: idGrupo },
+    });
+
+    creado(res, {
+      id_lote: resultado.insertId,
+      capacidad_kwp: (datos.cantidad * datos.potencia_wp) / 1000,
+      mensaje: `Lote de ${datos.cantidad} panel(es) de ${datos.potencia_wp} Wp registrado correctamente.`,
+    });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// PUT /projects/:projectId/groups/:groupId/panels/:panelId
+// ---------------------------------------------------------------------------
+gruposRouter.put(
+  '/:groupId/panels/:panelId',
+  requierePermiso(PERMISOS.INVERSORES_GESTIONAR),
+  validarCuerpo(esquemaLotePaneles.partial()),
+  asyncHandler(async (req, res) => {
+    const idProyecto = await proyectoDe(req);
+    const idGrupo = await grupoDe(idProyecto, req);
+    const idLote = Number(req.params.panelId);
+    const datos = req.body as Partial<z.infer<typeof esquemaLotePaneles>>;
+
+    const actual = await queryOne(
+      'SELECT * FROM paneles_grupo WHERE id_lote = ? AND id_grupo = ?',
+      [idLote, idGrupo],
+    );
+    if (!actual) throw errores.noEncontrado('el lote de paneles indicado');
+
+    if (datos.fecha_instalacion && datos.fecha_instalacion > hoyISO()) {
+      throw errores.validacion('La fecha de instalacion no puede ser futura.');
+    }
+
+    const mapa: Record<string, unknown> = {
+      cantidad: datos.cantidad,
+      potencia_wp: datos.potencia_wp,
+      marca: datos.marca,
+      modelo: datos.modelo,
+      fecha_instalacion: datos.fecha_instalacion,
+      observaciones: datos.observaciones,
+      activo: datos.activo === undefined ? undefined : datos.activo ? 1 : 0,
+    };
+    const campos = Object.entries(mapa).filter(([, v]) => v !== undefined);
+    if (campos.length === 0) throw errores.solicitudInvalida('No se enviaron cambios.');
+
+    await execute(
+      `UPDATE paneles_grupo SET ${campos.map(([k]) => `${k} = ?`).join(', ')}, updated_by = ?
+        WHERE id_lote = ?`,
+      [...campos.map(([, v]) => v), req.usuario!.id_usuario, idLote],
+    );
+
+    await auditarDesdeRequest(req, {
+      accion: 'LOTE_PANELES_ACTUALIZADO',
+      entidad: 'paneles_grupo',
+      idEntidad: idLote,
+      antes: actual,
+      despues: datos,
+    });
+
+    ok(res, { mensaje: 'Lote de paneles actualizado correctamente.' });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// DELETE /projects/:projectId/groups/:groupId/panels/:panelId
+//
+// Siempre desactiva (nunca borra fisicamente): un lote retirado sigue
+// siendo parte del historico de la instalacion (ej. paneles reemplazados).
+// ---------------------------------------------------------------------------
+gruposRouter.delete(
+  '/:groupId/panels/:panelId',
+  requierePermiso(PERMISOS.INVERSORES_GESTIONAR),
+  asyncHandler(async (req, res) => {
+    const idProyecto = await proyectoDe(req);
+    const idGrupo = await grupoDe(idProyecto, req);
+    const idLote = Number(req.params.panelId);
+
+    const actual = await queryOne(
+      'SELECT * FROM paneles_grupo WHERE id_lote = ? AND id_grupo = ?',
+      [idLote, idGrupo],
+    );
+    if (!actual) throw errores.noEncontrado('el lote de paneles indicado');
+
+    await execute('UPDATE paneles_grupo SET activo = 0, updated_by = ? WHERE id_lote = ?', [
+      req.usuario!.id_usuario,
+      idLote,
+    ]);
+
+    await auditarDesdeRequest(req, {
+      accion: 'LOTE_PANELES_DESACTIVADO',
+      entidad: 'paneles_grupo',
+      idEntidad: idLote,
+      antes: actual,
+    });
+
+    ok(res, { mensaje: 'Lote de paneles retirado del total activo del grupo.' });
   }),
 );
