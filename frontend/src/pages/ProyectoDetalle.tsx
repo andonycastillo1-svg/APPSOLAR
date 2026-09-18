@@ -62,6 +62,12 @@ interface DetalleProyecto {
     primera_fecha: string | null;
     ultima_fecha: string | null;
   } | null;
+  // El proyecto nunca captura sus paneles por separado: siempre es la suma
+  // de los lotes de todos sus grupos (ver PanelGrupos / ModalPaneles).
+  panelesProyecto: {
+    cantidadPaneles: number;
+    capacidadPanelesKwp: number;
+  };
 }
 
 interface TarifaTrimestre {
@@ -193,6 +199,9 @@ interface Grupo {
   tiene_banco_baterias: number;
   capacidad_baterias_kwh: number | null;
   capacidad_kwp: number | null;
+  // Calculados sumando los lotes de paneles activos del grupo (ver abajo).
+  cantidad_paneles: number;
+  capacidad_paneles_kwp: number;
   ubicacion: string | null;
   observaciones: string | null;
   activo: number;
@@ -206,6 +215,20 @@ interface TotalesGrupos {
   inversoresDeclarados: number;
   gruposConBaterias: number;
   capacidadBateriasKwh: number;
+  cantidadPaneles: number;
+  capacidadPanelesKwp: number;
+}
+
+/** Lote de paneles de un grupo: cantidad de paneles con la misma potencia. */
+interface LotePaneles {
+  id_lote: number;
+  id_grupo: number;
+  cantidad: number;
+  potencia_wp: number;
+  marca: string | null;
+  modelo: string | null;
+  fecha_instalacion: string | null;
+  observaciones: string | null;
 }
 
 type Pestana = 'resumen' | 'grupos' | 'tarifas' | 'proyecciones';
@@ -326,6 +349,13 @@ function Resumen({ proyecto }: { proyecto: DetalleProyecto }) {
           <p className="indicador__detalle">{proyecto.inversores.length} inversor(es) registrados</p>
         </div>
         <div className="indicador">
+          <p className="indicador__etiqueta">Paneles instalados</p>
+          <p className="indicador__valor">{numero(proyecto.panelesProyecto.cantidadPaneles, 0)}</p>
+          <p className="indicador__detalle">
+            {kwp(proyecto.panelesProyecto.capacidadPanelesKwp)} entre todos los grupos
+          </p>
+        </div>
+        <div className="indicador">
           <p className="indicador__etiqueta">Cliente</p>
           <p className="indicador__valor" style={{ fontSize: '1.05rem' }}>{proyecto.cliente}</p>
           <p className="indicador__detalle">NIT {proyecto.cliente_nit}</p>
@@ -407,6 +437,7 @@ function PanelGrupos({ idProyecto }: { idProyecto: number }) {
   const [formulario, setFormulario] = useState<typeof GRUPO_FORMULARIO | null>(null);
   const [editando, setEditando] = useState<number | null>(null);
   const [aEliminar, setAEliminar] = useState<Grupo | null>(null);
+  const [gestionandoPaneles, setGestionandoPaneles] = useState<Grupo | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [exito, setExito] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -546,6 +577,11 @@ function PanelGrupos({ idProyecto }: { idProyecto: number }) {
               <p className="indicador__valor">{totales.gruposConBaterias}</p>
               <p className="indicador__detalle">{kwh(totales.capacidadBateriasKwh)} de capacidad</p>
             </div>
+            <div className="indicador">
+              <p className="indicador__etiqueta">Paneles instalados</p>
+              <p className="indicador__valor">{numero(totales.cantidadPaneles, 0)}</p>
+              <p className="indicador__detalle">{kwp(totales.capacidadPanelesKwp)} en total</p>
+            </div>
           </section>
         ) : null}
 
@@ -587,6 +623,22 @@ function PanelGrupos({ idProyecto }: { idProyecto: number }) {
                 ),
             },
             { clave: 'kwp', titulo: 'Potencia', numerica: true, render: (g) => kwp(g.capacidad_kwp) },
+            {
+              clave: 'paneles',
+              titulo: 'Paneles',
+              numerica: true,
+              render: (g) =>
+                g.cantidad_paneles > 0 ? (
+                  <span>
+                    {numero(g.cantidad_paneles, 0)}
+                    <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>
+                      {kwp(g.capacidad_paneles_kwp)}
+                    </div>
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--texto-suave)' }}>Sin registrar</span>
+                ),
+            },
             { clave: 'ubicacion', titulo: 'Ubicacion', render: (g) => g.ubicacion ?? '—' },
             {
               clave: 'produccion',
@@ -615,6 +667,13 @@ function PanelGrupos({ idProyecto }: { idProyecto: number }) {
                   >
                     Ver inversores
                   </Link>
+                  <button
+                    type="button"
+                    className="boton boton--secundario boton--pequeno"
+                    onClick={() => setGestionandoPaneles(g)}
+                  >
+                    Paneles
+                  </button>
                   {gestionar ? (
                     <>
                       <button
@@ -769,7 +828,324 @@ function PanelGrupos({ idProyecto }: { idProyecto: number }) {
           alCancelar={() => setAEliminar(null)}
         />
       ) : null}
+
+      {gestionandoPaneles ? (
+        <ModalPaneles
+          idProyecto={idProyecto}
+          grupo={gestionandoPaneles}
+          gestionar={gestionar}
+          alCerrar={() => setGestionandoPaneles(null)}
+          alCambiar={refrescar}
+        />
+      ) : null}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Lotes de paneles de un grupo
+//
+// Una instalacion con varios anios de operacion suele tener paneles de
+// distinta generacion en el MISMO grupo (ej. paneles originales de menor
+// potencia mas una ampliacion posterior con paneles mas potentes, mismas
+// dimensiones fisicas). Cada lote registra una cantidad de paneles con su
+// propia potencia unitaria; el total del grupo (y, sumando grupos, el del
+// proyecto) se calcula solo, sin que el operador tenga que recalcularlo.
+// ---------------------------------------------------------------------------
+
+const LOTE_FORMULARIO = {
+  cantidad: '',
+  potencia_wp: '',
+  marca: '',
+  modelo: '',
+  fecha_instalacion: '',
+  observaciones: '',
+};
+
+function ModalPaneles({
+  idProyecto,
+  grupo,
+  gestionar,
+  alCerrar,
+  alCambiar,
+}: {
+  idProyecto: number;
+  grupo: Grupo;
+  gestionar: boolean;
+  alCerrar: () => void;
+  alCambiar: () => void;
+}) {
+  const [formulario, setFormulario] = useState<typeof LOTE_FORMULARIO | null>(null);
+  const [editando, setEditando] = useState<number | null>(null);
+  const [aRetirar, setARetirar] = useState<LotePaneles | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [ocupado, setOcupado] = useState(false);
+
+  const consulta = useQuery({
+    queryKey: ['paneles', grupo.id_grupo],
+    queryFn: async () => {
+      const respuesta = await api.obtener<LotePaneles[]>(
+        `/projects/${idProyecto}/groups/${grupo.id_grupo}/panels`,
+      );
+      return respuesta.datos;
+    },
+  });
+
+  const lotes = consulta.data ?? [];
+  const totalCantidad = lotes.reduce((a, l) => a + Number(l.cantidad), 0);
+  const totalKwp = lotes.reduce((a, l) => a + (Number(l.cantidad) * Number(l.potencia_wp)) / 1000, 0);
+  const erroresCampo = error instanceof ErrorApi ? error.erroresPorCampo : {};
+
+  const refrescar = () => {
+    void consulta.refetch();
+    alCambiar();
+  };
+
+  const guardar = async (evento: FormEvent) => {
+    evento.preventDefault();
+    if (!formulario) return;
+    setOcupado(true);
+    setError(null);
+    try {
+      const cuerpo = {
+        cantidad: Number(formulario.cantidad),
+        potencia_wp: Number(formulario.potencia_wp),
+        marca: formulario.marca || null,
+        modelo: formulario.modelo || null,
+        fecha_instalacion: formulario.fecha_instalacion || null,
+        observaciones: formulario.observaciones || null,
+      };
+      const ruta = `/projects/${idProyecto}/groups/${grupo.id_grupo}/panels`;
+      if (editando) {
+        await api.actualizar<{ mensaje: string }>(`${ruta}/${editando}`, cuerpo);
+      } else {
+        await api.crear<{ mensaje: string }>(ruta, cuerpo);
+      }
+      setFormulario(null);
+      setEditando(null);
+      refrescar();
+    } catch (fallo) {
+      setError(fallo);
+    } finally {
+      setOcupado(false);
+    }
+  };
+
+  const retirar = async () => {
+    if (!aRetirar) return;
+    setOcupado(true);
+    try {
+      await api.eliminar(
+        `/projects/${idProyecto}/groups/${grupo.id_grupo}/panels/${aRetirar.id_lote}`,
+      );
+      setARetirar(null);
+      refrescar();
+    } catch (fallo) {
+      setError(fallo);
+      setARetirar(null);
+    } finally {
+      setOcupado(false);
+    }
+  };
+
+  return (
+    <Modal titulo={`Paneles de ${grupo.nombre}`} alCerrar={alCerrar} ancho>
+      {error ? <MensajeError error={error} /> : null}
+
+      <MensajeInfo titulo="Por que se registran por lotes">
+        Un grupo puede tener paneles de distintas generaciones -- por ejemplo, paneles originales de
+        menor potencia y, tras una ampliacion, paneles nuevos de mayor potencia con las mismas
+        dimensiones. Registre cada lote por separado (cantidad y potencia unitaria en Wp): el total de
+        paneles y la potencia instalada en kWp del grupo, y del proyecto, se calculan solos.
+      </MensajeInfo>
+
+      <section className="rejilla">
+        <div className="indicador">
+          <p className="indicador__etiqueta">Total de paneles</p>
+          <p className="indicador__valor">{numero(totalCantidad, 0)}</p>
+        </div>
+        <div className="indicador">
+          <p className="indicador__etiqueta">Potencia instalada</p>
+          <p className="indicador__valor">{kwp(totalKwp)}</p>
+        </div>
+      </section>
+
+      <Tabla<LotePaneles>
+        titulo="Lotes registrados"
+        columnas={[
+          {
+            clave: 'cantidad',
+            titulo: 'Cantidad',
+            numerica: true,
+            render: (l) => numero(l.cantidad, 0),
+          },
+          {
+            clave: 'potencia',
+            titulo: 'Potencia unitaria',
+            numerica: true,
+            render: (l) => `${numero(l.potencia_wp, 2)} Wp`,
+          },
+          {
+            clave: 'kwp',
+            titulo: 'Subtotal',
+            numerica: true,
+            render: (l) => kwp((Number(l.cantidad) * Number(l.potencia_wp)) / 1000),
+          },
+          {
+            clave: 'modelo',
+            titulo: 'Marca / modelo',
+            render: (l) => [l.marca, l.modelo].filter(Boolean).join(' ') || '—',
+          },
+          { clave: 'fecha', titulo: 'Instalado', render: (l) => fecha(l.fecha_instalacion) },
+          ...(gestionar
+            ? [
+                {
+                  clave: 'acciones',
+                  titulo: 'Acciones',
+                  render: (l: LotePaneles) => (
+                    <div className="acciones no-imprimir">
+                      <button
+                        type="button"
+                        className="boton boton--secundario boton--pequeno"
+                        onClick={() => {
+                          setEditando(l.id_lote);
+                          setError(null);
+                          setFormulario({
+                            cantidad: String(l.cantidad),
+                            potencia_wp: String(l.potencia_wp),
+                            marca: l.marca ?? '',
+                            modelo: l.modelo ?? '',
+                            fecha_instalacion: l.fecha_instalacion?.slice(0, 10) ?? '',
+                            observaciones: l.observaciones ?? '',
+                          });
+                        }}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="boton boton--peligro boton--pequeno"
+                        onClick={() => setARetirar(l)}
+                      >
+                        Retirar
+                      </button>
+                    </div>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+        filas={lotes}
+        claveFila={(l) => l.id_lote}
+        cargando={consulta.isLoading}
+        error={consulta.error}
+        alReintentar={() => void consulta.refetch()}
+        vacioTitulo="Este grupo aun no tiene paneles registrados"
+        vacioDescripcion="Registre al menos un lote para conocer la potencia instalada real del grupo."
+      />
+
+      {gestionar && !formulario ? (
+        <button
+          type="button"
+          className="boton no-imprimir"
+          style={{ marginTop: '0.9rem' }}
+          onClick={() => {
+            setEditando(null);
+            setError(null);
+            setFormulario({ ...LOTE_FORMULARIO });
+          }}
+        >
+          Agregar lote
+        </button>
+      ) : null}
+
+      {formulario ? (
+        <form onSubmit={guardar} noValidate style={{ marginTop: '0.9rem' }}>
+          <fieldset className="grupo-alta">
+            <legend>{editando ? 'Editar lote' : 'Nuevo lote de paneles'}</legend>
+            <div className="formulario">
+              <CampoTexto
+                etiqueta="Cantidad de paneles"
+                type="number"
+                min="1"
+                step="1"
+                obligatorio
+                value={formulario.cantidad}
+                error={erroresCampo.cantidad}
+                onChange={(e) => setFormulario({ ...formulario, cantidad: e.target.value })}
+              />
+              <CampoTexto
+                etiqueta="Potencia unitaria (Wp)"
+                type="number"
+                min="0.01"
+                step="0.01"
+                obligatorio
+                value={formulario.potencia_wp}
+                error={erroresCampo.potencia_wp}
+                ayuda="Ej. 440 o 640, segun la ficha tecnica del panel."
+                onChange={(e) => setFormulario({ ...formulario, potencia_wp: e.target.value })}
+              />
+              <CampoTexto
+                etiqueta="Marca"
+                value={formulario.marca}
+                onChange={(e) => setFormulario({ ...formulario, marca: e.target.value })}
+              />
+              <CampoTexto
+                etiqueta="Modelo"
+                value={formulario.modelo}
+                onChange={(e) => setFormulario({ ...formulario, modelo: e.target.value })}
+              />
+              <CampoTexto
+                etiqueta="Fecha de instalacion"
+                type="date"
+                value={formulario.fecha_instalacion}
+                error={erroresCampo.fecha_instalacion}
+                ayuda="Opcional. Util para distinguir la instalacion original de ampliaciones."
+                onChange={(e) => setFormulario({ ...formulario, fecha_instalacion: e.target.value })}
+              />
+              <CampoArea
+                etiqueta="Observaciones"
+                value={formulario.observaciones}
+                onChange={(e) => setFormulario({ ...formulario, observaciones: e.target.value })}
+              />
+            </div>
+            <div className="acciones" style={{ marginTop: '0.9rem', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="boton boton--secundario"
+                onClick={() => {
+                  setFormulario(null);
+                  setEditando(null);
+                }}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="boton" disabled={ocupado}>
+                {ocupado ? 'Guardando...' : 'Guardar lote'}
+              </button>
+            </div>
+          </fieldset>
+        </form>
+      ) : null}
+
+      {aRetirar ? (
+        <Confirmacion
+          titulo="Retirar el lote de paneles"
+          peligroso
+          ocupado={ocupado}
+          textoConfirmar="Retirar"
+          descripcion={
+            <p>
+              Se retiraran <strong>{aRetirar.cantidad} panel(es)</strong> de{' '}
+              {numero(aRetirar.potencia_wp, 2)} Wp del total activo del grupo. El registro no se
+              borra: queda en el historico como referencia.
+            </p>
+          }
+          alConfirmar={retirar}
+          alCancelar={() => setARetirar(null)}
+        />
+      ) : null}
+    </Modal>
   );
 }
 
