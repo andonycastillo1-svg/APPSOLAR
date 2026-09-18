@@ -176,15 +176,31 @@ proyectosRouter.get(
     );
     if (!proyecto) throw errores.noEncontrado('el proyecto solicitado');
 
-    const grupos = await query(
+    const grupos = await query<{
+      id_grupo: number;
+      cantidad_paneles: number;
+      capacidad_paneles_kwp: number;
+      [clave: string]: unknown;
+    }>(
       `SELECT g.*,
               (SELECT COUNT(*) FROM inversores i
                 WHERE i.id_grupo = g.id_grupo AND i.activo = 1) AS inversores_registrados,
               (SELECT COALESCE(SUM(p.kwh), 0) FROM produccion p
-                WHERE p.id_grupo = g.id_grupo AND p.activo = 1) AS kwh_total
+                WHERE p.id_grupo = g.id_grupo AND p.activo = 1) AS kwh_total,
+              (SELECT COALESCE(SUM(pl.cantidad), 0) FROM paneles_grupo pl
+                WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1) AS cantidad_paneles,
+              (SELECT COALESCE(SUM(pl.cantidad * pl.potencia_wp), 0) / 1000 FROM paneles_grupo pl
+                WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1) AS capacidad_paneles_kwp
          FROM grupos g WHERE g.id_proyecto = ? ORDER BY g.nombre`,
       [id],
     );
+
+    // El proyecto nunca captura sus paneles por separado: siempre es la
+    // suma de los lotes de todos sus grupos.
+    const panelesProyecto = {
+      cantidadPaneles: grupos.reduce((a, g) => a + Number(g.cantidad_paneles ?? 0), 0),
+      capacidadPanelesKwp: grupos.reduce((a, g) => a + Number(g.capacidad_paneles_kwp ?? 0), 0),
+    };
 
     const inversores = await query(
       `SELECT i.*, g.nombre AS grupo,
@@ -225,6 +241,7 @@ proyectosRouter.get(
       resumen,
       tarifasRecientes: tarifas,
       proyeccionVigente: proyeccion,
+      panelesProyecto,
     });
   }),
 );
