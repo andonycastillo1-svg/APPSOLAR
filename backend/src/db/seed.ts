@@ -305,6 +305,79 @@ export async function sembrarDemostracion(): Promise<void> {
     idsGrupo.push(resultado.insertId);
   }
 
+  // --- Lotes de paneles ---------------------------------------------------
+  // "Bloque A" muestra el caso que motivo la funcionalidad: una instalacion
+  // de varios anios con paneles originales de menor potencia (440 Wp) y una
+  // ampliacion posterior con paneles mas nuevos de mayor potencia (640 Wp),
+  // mismas dimensiones fisicas. El resto de los grupos llevan un solo lote,
+  // sin mezcla de generaciones.
+  const definicionPaneles = [
+    {
+      grupo: 0, // Bloque A - Campo norte
+      cantidad: 1200,
+      potencia_wp: 440,
+      marca: 'Trina Solar',
+      modelo: 'TSM-440',
+      fecha_instalacion: `${anioAnterior - 5}-03-15`,
+      observaciones: 'Instalacion original de la planta.',
+    },
+    {
+      grupo: 0, // Bloque A - Campo norte (ampliacion)
+      cantidad: 750,
+      potencia_wp: 640,
+      marca: 'Trina Solar',
+      modelo: 'TSM-640 Vertex',
+      fecha_instalacion: `${anioAnterior}-07-01`,
+      observaciones: 'Ampliacion: paneles de mayor potencia, mismas dimensiones que los originales.',
+    },
+    {
+      grupo: 1, // Bloque B - Campo sur
+      cantidad: 568,
+      potencia_wp: 440,
+      marca: 'Trina Solar',
+      modelo: 'TSM-440',
+      fecha_instalacion: `${anioAnterior - 5}-03-15`,
+      observaciones: null,
+    },
+    {
+      grupo: 2, // Bloque unico (Retalhuleu)
+      cantidad: 1250,
+      potencia_wp: 640,
+      marca: 'Jinko Solar',
+      modelo: 'JKM640N',
+      fecha_instalacion: `${anioAnterior - 1}-11-10`,
+      observaciones: null,
+    },
+    {
+      grupo: 3, // Bloque techo planta (Xela)
+      cantidad: 700,
+      potencia_wp: 640,
+      marca: 'Jinko Solar',
+      modelo: 'JKM640N',
+      fecha_instalacion: `${anioAnterior}-04-20`,
+      observaciones: null,
+    },
+  ];
+
+  for (const lote of definicionPaneles) {
+    await execute(
+      `INSERT INTO paneles_grupo
+         (id_grupo, cantidad, potencia_wp, marca, modelo, fecha_instalacion,
+          observaciones, activo, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+      [
+        idsGrupo[lote.grupo],
+        lote.cantidad,
+        lote.potencia_wp,
+        lote.marca,
+        lote.modelo,
+        lote.fecha_instalacion,
+        lote.observaciones,
+        usuarios.admin,
+      ],
+    );
+  }
+
   // --- Configuracion de la integracion Huawei (modo simulado) -----------
   const idApi = (
     await execute(
