@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1070" font-family="Segoe UI, Calibri, Arial, sans-serif"><rect width="1600" height="1070" fill="#FFFFFF"/>
+<text x="30" y="42" font-size="28" fill="#0B3C5D" font-weight="700" text-anchor="start">Figura 7. Integracion con Huawei FusionSolar</text>
+<g transform="translate(0,70)">
+<rect x="0" y="0" width="1600" height="1000" rx="0" fill="#F7F9FA" stroke="#9AA9B5" stroke-width="2" />
+<rect x="0" y="0" width="1600" height="70" rx="0" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="30" y="45" font-size="26" fill="#FFFFFF" font-weight="700" text-anchor="start">Monitoreo Energetico · Retse, S.A.</text>
+<text x="1570" y="45" font-size="21" fill="#FFFFFF" font-weight="400" text-anchor="end">Usuario: Administrativo  ▾</text>
+<rect x="0" y="70" width="290" height="930" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="34" y="130" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Tablero</text>
+<text x="34" y="190" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Resumen anual</text>
+<text x="34" y="250" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Produccion</text>
+<text x="34" y="310" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Importaciones</text>
+<rect x="12" y="336" width="266" height="50" rx="6" fill="#DCE9F2" stroke="#0B3C5D" stroke-width="2" />
+<text x="34" y="370" font-size="22" fill="#0B3C5D" font-weight="700" text-anchor="start">Integracion Huawei</text>
+<text x="34" y="430" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Clientes</text>
+<text x="34" y="490" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Proyectos</text>
+<text x="34" y="550" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Inversores</text>
+<text x="34" y="610" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Reportes</text>
+<text x="34" y="670" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Usuarios</text>
+<text x="34" y="730" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Auditoria</text>
+<text x="34" y="790" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Configuracion</text>
+<text x="320" y="130" font-size="34" fill="#0B3C5D" font-weight="700" text-anchor="start">Integracion Huawei FusionSolar</text>
+<rect x="320" y="150" width="600" height="330" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="340" y="190" font-size="24" fill="#0B3C5D" font-weight="700" text-anchor="start">Configuracion</text>
+<text x="340" y="220" font-size="19" fill="#5B6B77" font-weight="700" text-anchor="start">Modo</text>
+<rect x="340" y="230" width="560" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="354" y="260" font-size="20" fill="#8695A1" font-weight="400" text-anchor="start">MOCK  ▾  (MOCK / REAL)</text>
+<text x="340" y="310" font-size="19" fill="#5B6B77" font-weight="700" text-anchor="start">Endpoint</text>
+<rect x="340" y="320" width="560" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="354" y="350" font-size="20" fill="#8695A1" font-weight="400" text-anchor="start">https://…fusionsolar…</text>
+<text x="340" y="400" font-size="19" fill="#5B6B77" font-weight="700" text-anchor="start">IP autorizada (opcional)</text>
+<rect x="340" y="410" width="560" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<rect x="950" y="150" width="620" height="330" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="970" y="190" font-size="24" fill="#0B3C5D" font-weight="700" text-anchor="start">Estado de la conexion</text>
+<text x="970" y="240" font-size="21" fill="#1B2A33" font-weight="400" text-anchor="start">Ultima prueba: 22/09/2026 10:15</text>
+<text x="970" y="285" font-size="21" fill="#1E7A46" font-weight="700" text-anchor="start">Ultima sincronizacion: exitosa</text>
+<rect x="970" y="340" width="260" height="46" rx="6" fill="#FFFFFF" stroke="#0B3C5D" stroke-width="2" />
+<text x="1100" y="371" font-size="20" fill="#0B3C5D" font-weight="700" text-anchor="middle">Probar conexion</text>
+<rect x="1250" y="340" width="300" height="46" rx="6" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="1400" y="371" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="middle">Sincronizar ahora</text>
+<text x="320" y="545" font-size="24" fill="#1B2A33" font-weight="700" text-anchor="start">Historial de sincronizaciones</text>
+<rect x="320" y="565" width="1250" height="50" rx="4" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="334" y="598" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Fecha</text>
+<text x="542.3333333333334" y="598" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Estado</text>
+<text x="750.6666666666667" y="598" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Duracion</text>
+<text x="959" y="598" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Recibidas</text>
+<text x="1167.3333333333335" y="598" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Insertadas</text>
+<text x="1375.6666666666667" y="598" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Rechazadas</text>
+<rect x="320" y="615" width="1250" height="50" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="1" />
+<text x="334" y="648" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">22/09 10:15</text>
+<text x="542.3333333333334" y="648" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Exitosa</text>
+<text x="750.6666666666667" y="648" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">4 s</text>
+<text x="959" y="648" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">120</text>
+<text x="1167.3333333333335" y="648" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">118</text>
+<text x="1375.6666666666667" y="648" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">2</text>
+<rect x="320" y="665" width="1250" height="50" rx="0" fill="#EEF2F5" stroke="#9AA9B5" stroke-width="1" />
+<text x="334" y="698" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">21/09 10:00</text>
+<text x="542.3333333333334" y="698" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Exitosa</text>
+<text x="750.6666666666667" y="698" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">3 s</text>
+<text x="959" y="698" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">120</text>
+<text x="1167.3333333333335" y="698" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">120</text>
+<text x="1375.6666666666667" y="698" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">0</text>
+<rect x="320" y="715" width="1250" height="50" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="1" />
+<text x="334" y="748" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">20/09 10:00</text>
+<text x="542.3333333333334" y="748" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Error de conexion</text>
+<text x="750.6666666666667" y="748" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">30 s</text>
+<text x="959" y="748" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">0</text>
+<text x="1167.3333333333335" y="748" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">0</text>
+<text x="1375.6666666666667" y="748" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">0</text>
+<text x="320" y="820" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Pasos para activar el modo REAL · Modo simulado marcado claramente</text>
+</g></svg>
