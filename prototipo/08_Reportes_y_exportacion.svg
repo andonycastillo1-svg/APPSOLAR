@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1070" font-family="Segoe UI, Calibri, Arial, sans-serif"><rect width="1600" height="1070" fill="#FFFFFF"/>
+<text x="30" y="42" font-size="28" fill="#0B3C5D" font-weight="700" text-anchor="start">Figura 8. Reportes y exportacion</text>
+<g transform="translate(0,70)">
+<rect x="0" y="0" width="1600" height="1000" rx="0" fill="#F7F9FA" stroke="#9AA9B5" stroke-width="2" />
+<rect x="0" y="0" width="1600" height="70" rx="0" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="30" y="45" font-size="26" fill="#FFFFFF" font-weight="700" text-anchor="start">Monitoreo Energetico · Retse, S.A.</text>
+<text x="1570" y="45" font-size="21" fill="#FFFFFF" font-weight="400" text-anchor="end">Usuario: Administrativo  ▾</text>
+<rect x="0" y="70" width="290" height="930" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="34" y="130" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Tablero</text>
+<text x="34" y="190" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Resumen anual</text>
+<text x="34" y="250" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Produccion</text>
+<text x="34" y="310" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Importaciones</text>
+<text x="34" y="370" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Integracion Huawei</text>
+<text x="34" y="430" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Clientes</text>
+<text x="34" y="490" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Proyectos</text>
+<text x="34" y="550" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Inversores</text>
+<rect x="12" y="576" width="266" height="50" rx="6" fill="#DCE9F2" stroke="#0B3C5D" stroke-width="2" />
+<text x="34" y="610" font-size="22" fill="#0B3C5D" font-weight="700" text-anchor="start">Reportes</text>
+<text x="34" y="670" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Usuarios</text>
+<text x="34" y="730" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Auditoria</text>
+<text x="34" y="790" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Configuracion</text>
+<text x="320" y="130" font-size="34" fill="#0B3C5D" font-weight="700" text-anchor="start">Reportes</text>
+<rect x="320" y="150" width="240" height="46" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="334" y="181" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Cliente ▾</text>
+<rect x="572" y="150" width="240" height="46" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="586" y="181" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Proyecto ▾</text>
+<rect x="824" y="150" width="240" height="46" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="838" y="181" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Inversores ▾</text>
+<rect x="1076" y="150" width="240" height="46" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="1090" y="181" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Periodo ▾</text>
+<rect x="1328" y="150" width="240" height="46" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="1342" y="181" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Granularidad ▾</text>
+<rect x="1350" y="215" width="220" height="46" rx="6" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="1460" y="246" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="middle">Generar reporte</text>
+<rect x="320" y="290" width="1250" height="660" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="340" y="330" font-size="24" fill="#0B3C5D" font-weight="700" text-anchor="start">Reporte de produccion y cumplimiento — Planta Norte — 2026</text>
+<rect x="340" y="350" width="290" height="120" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="358" y="388" font-size="19" fill="#5B6B77" font-weight="400" text-anchor="start">Total kWh</text>
+<text x="358" y="440" font-size="36" fill="#0B3C5D" font-weight="700" text-anchor="start">1,250,400</text>
+<rect x="650" y="350" width="290" height="120" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="668" y="388" font-size="19" fill="#5B6B77" font-weight="400" text-anchor="start">Proyeccion</text>
+<text x="668" y="440" font-size="36" fill="#0B3C5D" font-weight="700" text-anchor="start">1,283,000</text>
+<rect x="960" y="350" width="290" height="120" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="978" y="388" font-size="19" fill="#5B6B77" font-weight="400" text-anchor="start">Cumplimiento</text>
+<text x="978" y="440" font-size="36" fill="#0B3C5D" font-weight="700" text-anchor="start">97.4 %</text>
+<rect x="1270" y="350" width="280" height="120" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="1288" y="388" font-size="19" fill="#5B6B77" font-weight="400" text-anchor="start">Valor (Q)</text>
+<text x="1288" y="440" font-size="36" fill="#0B3C5D" font-weight="700" text-anchor="start">985,300</text>
+<rect x="340" y="500" width="1210" height="250" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<rect x="370" y="657" width="57.49999999999999" height="62.99999999999999" fill="#0B3C5D" opacity="0.75"/>
+<rect x="465.8333333333333" y="561.6077396436979" width="57.49999999999999" height="158.3922603563021" fill="#0B3C5D" opacity="0.75"/>
+<rect x="561.6666666666666" y="605.965364189675" width="57.49999999999999" height="114.03463581032497" fill="#0B3C5D" opacity="0.75"/>
+<rect x="657.5" y="588.9111502407866" width="57.49999999999999" height="131.08884975921342" fill="#0B3C5D" opacity="0.75"/>
+<rect x="753.3333333333333" y="569.5379890837048" width="57.49999999999999" height="150.46201091629516" fill="#0B3C5D" opacity="0.75"/>
+<rect x="849.1666666666666" y="635.7031211793062" width="57.49999999999999" height="84.29687882069373" fill="#0B3C5D" opacity="0.75"/>
+<rect x="945" y="558.1442088079141" width="57.49999999999999" height="161.8557911920859" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1040.8333333333333" y="625.4092621274142" width="57.49999999999999" height="94.59073787258586" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1136.6666666666665" y="575.0451795605203" width="57.49999999999999" height="144.9548204394797" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1232.5" y="581.5636251920158" width="57.49999999999999" height="138.43637480798418" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1328.3333333333333" y="615.4034633541626" width="57.49999999999999" height="104.59653664583745" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1424.1666666666665" y="559.3095755368133" width="57.49999999999999" height="160.6904244631867" fill="#0B3C5D" opacity="0.75"/>
+<line x1="360" y1="720" x2="1530" y2="720" stroke="#9AA9B5" stroke-width="2"/>
+<rect x="340" y="770" width="1210" height="50" rx="4" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="354" y="803" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Periodo</text>
+<text x="656.5" y="803" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">kWh</text>
+<text x="959" y="803" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Tarifa</text>
+<text x="1261.5" y="803" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Valor Q</text>
+<rect x="340" y="820" width="1210" height="50" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="1" />
+<text x="354" y="853" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">T1</text>
+<text x="656.5" y="853" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">310,200</text>
+<text x="959" y="853" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">0.78</text>
+<text x="1261.5" y="853" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">241,956</text>
+<rect x="340" y="870" width="1210" height="50" rx="0" fill="#EEF2F5" stroke="#9AA9B5" stroke-width="1" />
+<text x="354" y="903" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">T2</text>
+<text x="656.5" y="903" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">345,100</text>
+<text x="959" y="903" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">0.80</text>
+<text x="1261.5" y="903" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">276,080</text>
+<rect x="1000" y="890" width="170" height="46" rx="6" fill="#FFFFFF" stroke="#0B3C5D" stroke-width="2" />
+<text x="1085" y="921" font-size="20" fill="#0B3C5D" font-weight="700" text-anchor="middle">PDF</text>
+<rect x="1190" y="890" width="170" height="46" rx="6" fill="#FFFFFF" stroke="#0B3C5D" stroke-width="2" />
+<text x="1275" y="921" font-size="20" fill="#0B3C5D" font-weight="700" text-anchor="middle">CSV / XLSX</text>
+<rect x="1380" y="890" width="170" height="46" rx="6" fill="#FFFFFF" stroke="#0B3C5D" stroke-width="2" />
+<text x="1465" y="921" font-size="20" fill="#0B3C5D" font-weight="700" text-anchor="middle">Imprimir</text>
+</g></svg>
