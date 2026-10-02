@@ -369,10 +369,8 @@
             "enum": [
               "PPA",
               "EPC",
-              "AUTOCONSUMO",
-              "OTRO"
-            ],
-            "default": "OTRO"
+              "EDS"
+            ]
           },
           "capacidad_kwp": {
             "type": "number",
@@ -2377,8 +2375,7 @@
               "enum": [
                 "PPA",
                 "EPC",
-                "AUTOCONSUMO",
-                "OTRO"
+                "EDS"
               ]
             }
           }
