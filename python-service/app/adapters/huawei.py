@@ -239,12 +239,17 @@ class HuaweiSmartPVMSAdapter(AdaptadorFabricante):
 
             # Mapa serial -> devId consultando los dispositivos de cada estacion.
             mapa_dispositivos: dict[str, str] = {}
+            # devTypeId: 1 = inversor string, 38 = inversor residencial. El KPI
+            # solo responde si el tipo enviado coincide con el del dispositivo.
+            tipo_por_id: dict[str, int] = {}
             for estacion in estaciones or []:
                 cuerpo = await self._peticion(cliente, "/getDevList", {"stationCodes": estacion})
                 for dispositivo in cuerpo.get("data") or []:
                     sn = str(dispositivo.get("esnCode") or dispositivo.get("devDn") or "")
                     if sn:
-                        mapa_dispositivos[sn.lower()] = str(dispositivo.get("id"))
+                        dev_id = str(dispositivo.get("id"))
+                        mapa_dispositivos[sn.lower()] = dev_id
+                        tipo_por_id[dev_id] = int(dispositivo.get("devTypeId") or 1)
 
             faltantes = [s for s in seriales if s.lower() not in mapa_dispositivos]
             if faltantes:
@@ -257,7 +262,11 @@ class HuaweiSmartPVMSAdapter(AdaptadorFabricante):
                 return resultado
 
             inverso = {v: k for k, v in mapa_dispositivos.items()}
-            actual = desde
+            # Huawei devuelve el MES completo en getDevKpiDay y el AÑO completo en
+            # getDevKpiMonth: se consulta una vez por periodo, no una vez por dia.
+            inicio_rango = desde if granularidad == "DIARIA" else desde.replace(day=1)
+            actual = desde.replace(day=1) if granularidad == "DIARIA" else desde.replace(month=1, day=1)
+            vistos: set[tuple[str, str]] = set()
 
             while actual <= hasta:
                 marca_tiempo = int(
@@ -265,13 +274,17 @@ class HuaweiSmartPVMSAdapter(AdaptadorFabricante):
                     * 1000
                 )
                 ruta = "/getDevKpiDay" if granularidad == "DIARIA" else "/getDevKpiMonth"
-                cuerpo = await self._peticion(
-                    cliente,
-                    ruta,
-                    {"devIds": ",".join(ids), "devTypeId": 1, "collectTime": marca_tiempo},
-                )
+                filas_kpi: list[dict] = []
+                for tipo in sorted({tipo_por_id.get(i, 1) for i in ids}):
+                    ids_tipo = [i for i in ids if tipo_por_id.get(i, 1) == tipo]
+                    cuerpo = await self._peticion(
+                        cliente,
+                        ruta,
+                        {"devIds": ",".join(ids_tipo), "devTypeId": tipo, "collectTime": marca_tiempo},
+                    )
+                    filas_kpi.extend(cuerpo.get("data") or [])
 
-                for fila in cuerpo.get("data") or []:
+                for fila in filas_kpi:
                     dev_id = str(fila.get("devId"))
                     indicadores = fila.get("dataItemMap") or {}
                     energia = indicadores.get("product_power")
@@ -280,6 +293,12 @@ class HuaweiSmartPVMSAdapter(AdaptadorFabricante):
                     serial = inverso.get(dev_id, dev_id)
                     marca = fila.get("collectTime", marca_tiempo)
                     fecha_registro = datetime.fromtimestamp(marca / 1000, tz=timezone.utc).date()
+                    if not (inicio_rango <= fecha_registro <= hasta):
+                        continue
+                    clave = (serial, fecha_registro.isoformat())
+                    if clave in vistos:
+                        continue
+                    vistos.add(clave)
                     resultado.registros.append(
                         RegistroCanonico(
                             serial=serial,
@@ -289,7 +308,10 @@ class HuaweiSmartPVMSAdapter(AdaptadorFabricante):
                         )
                     )
 
-                actual = actual + timedelta(days=1 if granularidad == "DIARIA" else 31)
+                if granularidad == "DIARIA":
+                    actual = date(actual.year + (actual.month == 12), (actual.month % 12) + 1, 1)
+                else:
+                    actual = date(actual.year + 1, 1, 1)
 
         return resultado
 
@@ -428,10 +450,14 @@ class HuaweiSmartPVMSAdapter(AdaptadorFabricante):
             )
 
         dias = (hasta - desde).days
-        if dias > 400:
+        # Cada consulta a Huawei cubre un mes (diario) o un año (mensual), asi que
+        # el costo en llamadas es bajo; el tope solo evita rangos desmedidos.
+        maximo_dias = 800 if granularidad == "DIARIA" else 3700
+        if dias > maximo_dias:
             raise ErrorAdaptador(
                 "LIMITE_API",
-                "El rango solicitado supera los 400 dias. Divida la consulta en periodos menores.",
+                f"El rango solicitado supera los {maximo_dias} dias para esta granularidad. "
+                "Divida la consulta en periodos menores.",
             )
 
         if self.es_simulado:
