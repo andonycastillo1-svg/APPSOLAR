@@ -216,7 +216,7 @@ export async function sembrarDemostracion(): Promise<void> {
       cliente: clienteB,
       nombre: 'DEMO Autoconsumo Textiles Xela',
       ubicacion: 'Quetzaltenango, Guatemala',
-      tipo: 'AUTOCONSUMO',
+      tipo: 'EDS',
       kwp: 450.0,
       inicio: `${anioAnterior}-04-01`,
       baseMensual: 58000,
