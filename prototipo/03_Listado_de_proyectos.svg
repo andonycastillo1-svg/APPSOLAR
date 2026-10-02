@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1070" font-family="Segoe UI, Calibri, Arial, sans-serif"><rect width="1600" height="1070" fill="#FFFFFF"/>
+<text x="30" y="42" font-size="28" fill="#0B3C5D" font-weight="700" text-anchor="start">Figura 3. Listado de proyectos</text>
+<g transform="translate(0,70)">
+<rect x="0" y="0" width="1600" height="1000" rx="0" fill="#F7F9FA" stroke="#9AA9B5" stroke-width="2" />
+<rect x="0" y="0" width="1600" height="70" rx="0" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="30" y="45" font-size="26" fill="#FFFFFF" font-weight="700" text-anchor="start">Monitoreo Energetico · Retse, S.A.</text>
+<text x="1570" y="45" font-size="21" fill="#FFFFFF" font-weight="400" text-anchor="end">Usuario: Administrativo  ▾</text>
+<rect x="0" y="70" width="290" height="930" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="34" y="130" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Tablero</text>
+<text x="34" y="190" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Resumen anual</text>
+<text x="34" y="250" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Produccion</text>
+<text x="34" y="310" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Importaciones</text>
+<text x="34" y="370" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Integracion Huawei</text>
+<text x="34" y="430" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Clientes</text>
+<rect x="12" y="456" width="266" height="50" rx="6" fill="#DCE9F2" stroke="#0B3C5D" stroke-width="2" />
+<text x="34" y="490" font-size="22" fill="#0B3C5D" font-weight="700" text-anchor="start">Proyectos</text>
+<text x="34" y="550" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Inversores</text>
+<text x="34" y="610" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Reportes</text>
+<text x="34" y="670" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Usuarios</text>
+<text x="34" y="730" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Auditoria</text>
+<text x="34" y="790" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Configuracion</text>
+<text x="320" y="130" font-size="34" fill="#0B3C5D" font-weight="700" text-anchor="start">Proyectos</text>
+<rect x="320" y="150" width="480" height="46" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="336" y="181" font-size="20" fill="#8695A1" font-weight="400" text-anchor="start">Buscar por nombre o cliente…</text>
+<rect x="820" y="150" width="220" height="46" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="836" y="181" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Estado ▾</text>
+<rect x="1330" y="150" width="240" height="46" rx="6" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="1450" y="181" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="middle">+ Nuevo proyecto</text>
+<rect x="320" y="230" width="1250" height="50" rx="4" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="334" y="263" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Proyecto</text>
+<text x="542.3333333333334" y="263" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Cliente</text>
+<text x="750.6666666666667" y="263" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Modalidad</text>
+<text x="959" y="263" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Grupos</text>
+<text x="1167.3333333333335" y="263" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Prod. acumulada</text>
+<text x="1375.6666666666667" y="263" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="start">Acciones</text>
+<rect x="320" y="280" width="1250" height="50" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="1" />
+<text x="334" y="313" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Planta Norte</text>
+<text x="542.3333333333334" y="313" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Cliente A</text>
+<text x="750.6666666666667" y="313" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">PPA</text>
+<text x="959" y="313" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">3</text>
+<text x="1167.3333333333335" y="313" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">1.2 GWh</text>
+<text x="1375.6666666666667" y="313" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Ver · Editar</text>
+<rect x="320" y="330" width="1250" height="50" rx="0" fill="#EEF2F5" stroke="#9AA9B5" stroke-width="1" />
+<text x="334" y="363" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Planta Sur</text>
+<text x="542.3333333333334" y="363" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Cliente B</text>
+<text x="750.6666666666667" y="363" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">EPC</text>
+<text x="959" y="363" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">2</text>
+<text x="1167.3333333333335" y="363" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">0.8 GWh</text>
+<text x="1375.6666666666667" y="363" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Ver · Editar</text>
+<rect x="320" y="380" width="1250" height="50" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="1" />
+<text x="334" y="413" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Planta Este</text>
+<text x="542.3333333333334" y="413" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Cliente A</text>
+<text x="750.6666666666667" y="413" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">PPA</text>
+<text x="959" y="413" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">4</text>
+<text x="1167.3333333333335" y="413" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">2.1 GWh</text>
+<text x="1375.6666666666667" y="413" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Ver · Editar</text>
+<rect x="320" y="430" width="1250" height="50" rx="0" fill="#EEF2F5" stroke="#9AA9B5" stroke-width="1" />
+<text x="334" y="463" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Planta Oeste</text>
+<text x="542.3333333333334" y="463" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Cliente C</text>
+<text x="750.6666666666667" y="463" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">EPC</text>
+<text x="959" y="463" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">1</text>
+<text x="1167.3333333333335" y="463" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">0.3 GWh</text>
+<text x="1375.6666666666667" y="463" font-size="20" fill="#1B2A33" font-weight="400" text-anchor="start">Ver · Editar</text>
+<text x="320" y="620" font-size="22" fill="#5B6B77" font-weight="400" text-anchor="start">‹ 1 2 3 ›</text>
+</g></svg>
