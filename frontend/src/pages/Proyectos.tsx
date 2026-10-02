@@ -39,7 +39,7 @@ const VACIO = {
   id_cliente: '',
   nombre: '',
   ubicacion: '',
-  tipo_proyecto: 'OTRO',
+  tipo_proyecto: 'PPA',
   capacidad_kwp: '',
   fecha_inicio: '',
   observaciones: '',
@@ -291,8 +291,7 @@ export function PaginaProyectos() {
             <option value="">Todas</option>
             <option value="PPA">PPA</option>
             <option value="EPC">EPC</option>
-            <option value="AUTOCONSUMO">Autoconsumo</option>
-            <option value="OTRO">Otro</option>
+            <option value="EDS">EDS</option>
           </CampoSelect>
           <CampoSelect
             etiqueta="Estado"
@@ -448,8 +447,8 @@ export function PaginaProyectos() {
             {paso === 1 ? (
               <>
                 <MensajeInfo>
-                  La <strong>modalidad comercial</strong> corresponde a los valores PPA / EPC
-                  observados en los historicos. La <strong>potencia instalada se expresa en kWp</strong>;
+                  La <strong>modalidad comercial</strong> puede ser PPA, EPC o EDS. La{' '}
+                  <strong>potencia instalada se expresa en kWp</strong>;
                   la energia generada se registra aparte en kWh.
                 </MensajeInfo>
                 <div className="formulario">
@@ -481,8 +480,7 @@ export function PaginaProyectos() {
                   >
                     <option value="PPA">PPA</option>
                     <option value="EPC">EPC</option>
-                    <option value="AUTOCONSUMO">Autoconsumo</option>
-                    <option value="OTRO">Otro</option>
+                    <option value="EDS">EDS</option>
                   </CampoSelect>
                   <CampoTexto
                     etiqueta="Ubicacion"
@@ -752,6 +750,7 @@ export function PaginaProyectos() {
               ) : null}
               {!editando && paso < 3 ? (
                 <button
+                  key="siguiente"
                   type="button"
                   className="boton"
                   disabled={Boolean(errorDelPaso())}
@@ -760,7 +759,12 @@ export function PaginaProyectos() {
                   Siguiente
                 </button>
               ) : (
-                <button type="submit" className="boton" disabled={ocupado || Boolean(errorDelPaso())}>
+                <button
+                  key="finalizar"
+                  type="submit"
+                  className="boton"
+                  disabled={ocupado || Boolean(errorDelPaso())}
+                >
                   {ocupado ? 'Guardando...' : editando ? 'Guardar proyecto' : 'Crear proyecto'}
                 </button>
               )}
