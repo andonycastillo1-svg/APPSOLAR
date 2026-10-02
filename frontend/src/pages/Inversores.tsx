@@ -464,7 +464,7 @@ export function PaginaInversores() {
                 />
               ) : null}
               <CampoTexto
-                etiqueta="Potencia instalada (kWp)"
+                etiqueta="Capacidad (kWp)"
                 type="number"
                 min="0"
                 step="0.001"
