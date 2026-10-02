@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1070" font-family="Segoe UI, Calibri, Arial, sans-serif"><rect width="1600" height="1070" fill="#FFFFFF"/>
+<text x="30" y="42" font-size="28" fill="#0B3C5D" font-weight="700" text-anchor="start">Figura 5. Tarifas trimestrales de energia</text>
+<g transform="translate(0,70)">
+<rect x="0" y="0" width="1600" height="1000" rx="0" fill="#F7F9FA" stroke="#9AA9B5" stroke-width="2" />
+<rect x="0" y="0" width="1600" height="70" rx="0" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="30" y="45" font-size="26" fill="#FFFFFF" font-weight="700" text-anchor="start">Monitoreo Energetico · Retse, S.A.</text>
+<text x="1570" y="45" font-size="21" fill="#FFFFFF" font-weight="400" text-anchor="end">Usuario: Administrativo  ▾</text>
+<rect x="0" y="70" width="290" height="930" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="34" y="130" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Tablero</text>
+<text x="34" y="190" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Resumen anual</text>
+<text x="34" y="250" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Produccion</text>
+<text x="34" y="310" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Importaciones</text>
+<text x="34" y="370" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Integracion Huawei</text>
+<text x="34" y="430" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Clientes</text>
+<rect x="12" y="456" width="266" height="50" rx="6" fill="#DCE9F2" stroke="#0B3C5D" stroke-width="2" />
+<text x="34" y="490" font-size="22" fill="#0B3C5D" font-weight="700" text-anchor="start">Proyectos</text>
+<text x="34" y="550" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Inversores</text>
+<text x="34" y="610" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Reportes</text>
+<text x="34" y="670" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Usuarios</text>
+<text x="34" y="730" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Auditoria</text>
+<text x="34" y="790" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Configuracion</text>
+<text x="320" y="130" font-size="34" fill="#0B3C5D" font-weight="700" text-anchor="start">Tarifas de energia</text>
+<text x="320" y="175" font-size="22" fill="#1B2A33" font-weight="700" text-anchor="start">Proyecto: Planta Norte      Ano: 2026 ▾</text>
+<text x="320" y="225" font-size="22" fill="#5B6B77" font-weight="700" text-anchor="start">Calendario trimestral</text>
+<rect x="320" y="245" width="295" height="210" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="340" y="285" font-size="22" fill="#0B3C5D" font-weight="700" text-anchor="start">T1 (ene–mar)</text>
+<text x="340" y="345" font-size="34" fill="#1B2A33" font-weight="700" text-anchor="start">Q 0.78</text>
+<text x="340" y="400" font-size="21" fill="#5B6B77" font-weight="400" text-anchor="start">Aprobada</text>
+<rect x="635" y="245" width="295" height="210" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="655" y="285" font-size="22" fill="#0B3C5D" font-weight="700" text-anchor="start">T2 (abr–jun)</text>
+<text x="655" y="345" font-size="34" fill="#1B2A33" font-weight="700" text-anchor="start">Q 0.80</text>
+<text x="655" y="400" font-size="21" fill="#5B6B77" font-weight="400" text-anchor="start">Aprobada</text>
+<rect x="950" y="245" width="295" height="210" rx="6" fill="#FFFFFF" stroke="#B7791F" stroke-width="3" />
+<text x="970" y="285" font-size="22" fill="#0B3C5D" font-weight="700" text-anchor="start">T3 (jul–sep)</text>
+<text x="970" y="345" font-size="34" fill="#1B2A33" font-weight="700" text-anchor="start">Q 0.80</text>
+<text x="970" y="400" font-size="21" fill="#B7791F" font-weight="400" text-anchor="start">Borrador</text>
+<rect x="1265" y="245" width="295" height="210" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="1285" y="285" font-size="22" fill="#0B3C5D" font-weight="700" text-anchor="start">T4 (oct–dic)</text>
+<text x="1285" y="345" font-size="34" fill="#1B2A33" font-weight="700" text-anchor="start">Sin tarifa</text>
+<text x="1285" y="400" font-size="21" fill="#5B6B77" font-weight="400" text-anchor="start">—</text>
+<rect x="320" y="490" width="1250" height="90" rx="6" fill="#FFF7E6" stroke="#B7791F" stroke-width="2" />
+<text x="340" y="525" font-size="22" fill="#B7791F" font-weight="700" text-anchor="start">Alerta: el trimestre en curso (T3) no tiene tarifa aprobada. Actualizar.</text>
+<text x="320" y="630" font-size="19" fill="#5B6B77" font-weight="700" text-anchor="start">Trimestre</text>
+<rect x="320" y="640" width="300" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="334" y="670" font-size="20" fill="#8695A1" font-weight="400" text-anchor="start">T4 2026</text>
+<text x="650" y="630" font-size="19" fill="#5B6B77" font-weight="700" text-anchor="start">Costo (Q por kWh)</text>
+<rect x="650" y="640" width="300" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="664" y="670" font-size="20" fill="#8695A1" font-weight="400" text-anchor="start">0.00</text>
+<text x="980" y="630" font-size="19" fill="#5B6B77" font-weight="700" text-anchor="start">Motivo / comentario</text>
+<rect x="980" y="640" width="590" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<rect x="320" y="730" width="260" height="46" rx="6" fill="#FFFFFF" stroke="#0B3C5D" stroke-width="2" />
+<text x="450" y="761" font-size="20" fill="#0B3C5D" font-weight="700" text-anchor="middle">Copiar trimestre anterior</text>
+<rect x="610" y="730" width="200" height="46" rx="6" fill="#FFFFFF" stroke="#0B3C5D" stroke-width="2" />
+<text x="710" y="761" font-size="20" fill="#0B3C5D" font-weight="700" text-anchor="middle">Guardar borrador</text>
+<rect x="840" y="730" width="200" height="46" rx="6" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="940" y="761" font-size="20" fill="#FFFFFF" font-weight="700" text-anchor="middle">Aprobar</text>
+<text x="320" y="830" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Historial: autor · fecha de modificacion · estado (borrador / aprobada / anulada)</text>
+</g></svg>
