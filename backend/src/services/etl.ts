@@ -591,7 +591,7 @@ export async function plantillaXlsx(formato: FormatoArchivo): Promise<Buffer> {
           'PLANTILLA HISTORICA (COMPATIBLE CON EL EXCEL EXISTENTE)',
           '',
           'Planta       Obligatoria. Debe coincidir con el nombre del proyecto registrado.',
-          'Tipo         Opcional. Modalidad comercial: PPA, EPC, AUTOCONSUMO u OTRO.',
+          'Tipo         Opcional. Modalidad comercial: PPA, EPC o EDS.',
           'Anio         Obligatorio. Entero entre 2000 y 2100.',
           'Mes          Obligatorio. Nombre en espanol (Enero..Diciembre) o numero de 1 a 12.',
           'Generacion   Obligatoria. Energia mensual en kWh. No negativa.',
