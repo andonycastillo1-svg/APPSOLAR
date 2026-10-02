@@ -24,13 +24,13 @@ import { gruposRouter } from '../grupos/grupos.routes';
 export const proyectosRouter = Router();
 proyectosRouter.use(requiereAutenticacion);
 
-const TIPOS = ['PPA', 'EPC', 'AUTOCONSUMO', 'OTRO'] as const;
+const TIPOS = ['PPA', 'EPC', 'EDS'] as const;
 
 const esquemaProyecto = z.object({
   id_cliente: z.coerce.number().int().positive('Seleccione el cliente propietario del proyecto.'),
   nombre: z.string().trim().min(3, 'El nombre debe tener al menos 3 caracteres.').max(160),
   ubicacion: z.string().trim().max(255).optional().nullable(),
-  tipo_proyecto: z.enum(TIPOS).default('OTRO'),
+  tipo_proyecto: z.enum(TIPOS, { errorMap: () => ({ message: 'La modalidad comercial debe ser PPA, EPC o EDS.' }) }),
   capacidad_kwp: z.coerce.number().min(0, 'La potencia instalada no puede ser negativa.').optional().nullable(),
   fecha_inicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use el formato aaaa-mm-dd.').optional().nullable(),
   observaciones: z.string().trim().max(500).optional().nullable(),
