@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1070" font-family="Segoe UI, Calibri, Arial, sans-serif"><rect width="1600" height="1070" fill="#FFFFFF"/>
+<text x="30" y="42" font-size="28" fill="#0B3C5D" font-weight="700" text-anchor="start">Figura 2. Tablero de indicadores</text>
+<g transform="translate(0,70)">
+<rect x="0" y="0" width="1600" height="1000" rx="0" fill="#F7F9FA" stroke="#9AA9B5" stroke-width="2" />
+<rect x="0" y="0" width="1600" height="70" rx="0" fill="#0B3C5D" stroke="#0B3C5D" stroke-width="2" />
+<text x="30" y="45" font-size="26" fill="#FFFFFF" font-weight="700" text-anchor="start">Monitoreo Energetico · Retse, S.A.</text>
+<text x="1570" y="45" font-size="21" fill="#FFFFFF" font-weight="400" text-anchor="end">Usuario: Administrativo  ▾</text>
+<rect x="0" y="70" width="290" height="930" rx="0" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<rect x="12" y="96" width="266" height="50" rx="6" fill="#DCE9F2" stroke="#0B3C5D" stroke-width="2" />
+<text x="34" y="130" font-size="22" fill="#0B3C5D" font-weight="700" text-anchor="start">Tablero</text>
+<text x="34" y="190" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Resumen anual</text>
+<text x="34" y="250" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Produccion</text>
+<text x="34" y="310" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Importaciones</text>
+<text x="34" y="370" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Integracion Huawei</text>
+<text x="34" y="430" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Clientes</text>
+<text x="34" y="490" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Proyectos</text>
+<text x="34" y="550" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Inversores</text>
+<text x="34" y="610" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Reportes</text>
+<text x="34" y="670" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Usuarios</text>
+<text x="34" y="730" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Auditoria</text>
+<text x="34" y="790" font-size="22" fill="#1B2A33" font-weight="400" text-anchor="start">Configuracion</text>
+<text x="320" y="130" font-size="34" fill="#0B3C5D" font-weight="700" text-anchor="start">Tablero de indicadores</text>
+<text x="320" y="175" font-size="20" fill="#5B6B77" font-weight="700" text-anchor="start">Filtros:</text>
+<rect x="410" y="150" width="240" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="424" y="180" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Cliente ▾</text>
+<rect x="670" y="150" width="240" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="684" y="180" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Proyecto ▾</text>
+<rect x="930" y="150" width="240" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="944" y="180" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Inversor ▾</text>
+<rect x="1190" y="150" width="240" height="44" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="1204" y="180" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Desde – Hasta ▾</text>
+<rect x="320" y="230" width="295" height="120" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="338" y="268" font-size="19" fill="#5B6B77" font-weight="400" text-anchor="start">Produccion total</text>
+<text x="338" y="320" font-size="36" fill="#0B3C5D" font-weight="700" text-anchor="start">1,250,400 kWh</text>
+<rect x="635" y="230" width="295" height="120" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="653" y="268" font-size="19" fill="#5B6B77" font-weight="400" text-anchor="start">Valor estimado</text>
+<text x="653" y="320" font-size="36" fill="#0B3C5D" font-weight="700" text-anchor="start">Q 985,300</text>
+<rect x="950" y="230" width="295" height="120" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="968" y="268" font-size="19" fill="#5B6B77" font-weight="400" text-anchor="start">Cumplimiento</text>
+<text x="968" y="320" font-size="36" fill="#0B3C5D" font-weight="700" text-anchor="start">97.4 %</text>
+<rect x="1265" y="230" width="295" height="120" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="1283" y="268" font-size="19" fill="#5B6B77" font-weight="400" text-anchor="start">Ultima carga</text>
+<text x="1283" y="320" font-size="36" fill="#0B3C5D" font-weight="700" text-anchor="start">Exitosa</text>
+<text x="320" y="400" font-size="22" fill="#1B2A33" font-weight="700" text-anchor="start">Produccion mensual (kWh) vs proyeccion</text>
+<rect x="320" y="415" width="780" height="380" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<rect x="350" y="656.5" width="36" height="108.5" fill="#0B3C5D" opacity="0.75"/>
+<rect x="410" y="492.21332938636857" width="36" height="272.78667061363143" fill="#0B3C5D" opacity="0.75"/>
+<rect x="470" y="568.6070161044404" width="36" height="196.39298389555967" fill="#0B3C5D" opacity="0.75"/>
+<rect x="530" y="539.2358698591324" width="36" height="225.76413014086756" fill="#0B3C5D" opacity="0.75"/>
+<rect x="590" y="505.87098119971387" width="36" height="259.12901880028613" fill="#0B3C5D" opacity="0.75"/>
+<rect x="650" y="619.8220420310274" width="36" height="145.17795796897255" fill="#0B3C5D" opacity="0.75"/>
+<rect x="710" y="486.2483596136298" width="36" height="278.7516403863702" fill="#0B3C5D" opacity="0.75"/>
+<rect x="770" y="602.0937292194354" width="36" height="162.90627078056454" fill="#0B3C5D" opacity="0.75"/>
+<rect x="830" y="515.3555870208961" width="36" height="249.64441297910395" fill="#0B3C5D" opacity="0.75"/>
+<rect x="890" y="526.581798941805" width="36" height="238.41820105819497" fill="#0B3C5D" opacity="0.75"/>
+<rect x="950" y="584.8615202210577" width="36" height="180.13847977894227" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1010" y="488.25538009117844" width="36" height="276.74461990882156" fill="#0B3C5D" opacity="0.75"/>
+<line x1="340" y1="765" x2="1080" y2="765" stroke="#9AA9B5" stroke-width="2"/>
+<text x="1130" y="400" font-size="22" fill="#1B2A33" font-weight="700" text-anchor="start">Por proyecto</text>
+<rect x="1130" y="415" width="440" height="380" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<rect x="1160" y="656.5" width="45.6" height="108.5" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1236" y="492.21332938636857" width="45.6" height="272.78667061363143" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1312" y="568.6070161044404" width="45.6" height="196.39298389555967" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1388" y="539.2358698591324" width="45.6" height="225.76413014086756" fill="#0B3C5D" opacity="0.75"/>
+<rect x="1464" y="505.87098119971387" width="45.6" height="259.12901880028613" fill="#0B3C5D" opacity="0.75"/>
+<line x1="1150" y1="765" x2="1550" y2="765" stroke="#9AA9B5" stroke-width="2"/>
+<rect x="320" y="820" width="1250" height="140" rx="6" fill="#FFFFFF" stroke="#9AA9B5" stroke-width="2" />
+<text x="340" y="855" font-size="22" fill="#B7791F" font-weight="700" text-anchor="start">Alerta: la tarifa del trimestre en curso no esta aprobada</text>
+<text x="340" y="895" font-size="20" fill="#5B6B77" font-weight="400" text-anchor="start">Inversores con menor produccion relativa · Comentarios del periodo</text>
+</g></svg>
