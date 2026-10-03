@@ -231,7 +231,7 @@ export function PaginaReportes() {
             <option value="ANUAL">Anual</option>
           </CampoSelect>
           <CampoTexto
-            etiqueta="Anio de referencia"
+            etiqueta="Año de referencia"
             type="number"
             min="2000"
             max="2100"
