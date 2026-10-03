@@ -9,7 +9,7 @@ import { errores } from '../utils/errors';
  *
  * Soporta dos formatos de plantilla:
  *  1. NORMALIZADO      -> fecha, kwh, inversor_serial, comentarios
- *  2. HISTORICO_EXCEL  -> Planta, Tipo, Anio, Mes, Generacion, Comentarios
+ *  2. HISTORICO_EXCEL  -> Planta, Tipo, Año, Mes, Generacion, Comentarios
  *                          (+ Inversor/Serial opcional)
  *
  * El resultado es un conjunto de filas canonicas mas la lista de errores y
@@ -140,7 +140,7 @@ export function detectarFormato(encabezados: string[]): {
   throw errores.validacion(
     'No se reconocieron los encabezados del archivo. Use la plantilla normalizada ' +
       '(fecha, kwh, inversor_serial, comentarios) o el formato historico ' +
-      '(Planta, Tipo, Anio, Mes, Generacion, Comentarios).',
+      '(Planta, Tipo, Año, Mes, Generacion, Comentarios).',
     { encabezadosRecibidos: encabezados },
   );
 }
@@ -273,7 +273,7 @@ async function leerXlsx(contenido: Buffer): Promise<{ encabezados: string[]; fil
 // ---------------------------------------------------------------------------
 
 export interface OpcionesLectura {
-  /** Anio obligatorio cuando el archivo no lo trae (hoja de proyeccion). */
+  /** Año obligatorio cuando el archivo no lo trae (hoja de proyeccion). */
   anioForzado?: number;
   /** Serial del inversor cuando todo el archivo pertenece a un solo equipo. */
   serialUnico?: string | null;
@@ -343,7 +343,7 @@ export async function leerArchivo(
 
       const anio = opciones.anioForzado ?? Number(parsearNumero(anioBruto));
       if (!Number.isInteger(anio) || anio < 2000 || anio > 2100) {
-        errar('Anio', anioBruto, 'ANIO_INVALIDO', 'El anio debe ser un entero valido entre 2000 y 2100.');
+        errar('Año', anioBruto, 'ANIO_INVALIDO', 'El año debe ser un entero valido entre 2000 y 2100.');
         continue;
       }
 
@@ -353,7 +353,7 @@ export async function leerArchivo(
           'Mes',
           mesBruto,
           'MES_INVALIDO',
-          'El mes no se reconocio. Use el nombre en espanol (Enero...Diciembre) o un numero de 1 a 12.',
+          'El mes no se reconocio. Use el nombre en español (Enero...Diciembre) o un numero de 1 a 12.',
         );
         continue;
       }
@@ -523,7 +523,7 @@ export function plantillaNormalizadaCsv(): string {
 
 export function plantillaHistoricaCsv(): string {
   return [
-    'Planta,Tipo,Anio,Mes,Generacion,Comentarios',
+    'Planta,Tipo,Año,Mes,Generacion,Comentarios',
     'Planta Demo Norte,PPA,2025,Enero,45200.0000,Operacion normal',
     'Planta Demo Norte,PPA,2025,Febrero,41800.5000,',
     'Planta Demo Sur,EPC,2025,Enero,28750.0000,Mantenimiento programado el 12',
@@ -553,7 +553,7 @@ export async function plantillaXlsx(formato: FormatoArchivo): Promise<Buffer> {
     hoja.columns = [
       { header: 'Planta', key: 'planta', width: 28 },
       { header: 'Tipo', key: 'tipo', width: 10 },
-      { header: 'Anio', key: 'anio', width: 10 },
+      { header: 'Año', key: 'anio', width: 10 },
       { header: 'Mes', key: 'mes', width: 14 },
       { header: 'Generacion', key: 'generacion', width: 16 },
       { header: 'Comentarios', key: 'comentarios', width: 40 },
@@ -592,8 +592,8 @@ export async function plantillaXlsx(formato: FormatoArchivo): Promise<Buffer> {
           '',
           'Planta       Obligatoria. Debe coincidir con el nombre del proyecto registrado.',
           'Tipo         Opcional. Modalidad comercial: PPA, EPC o EDS.',
-          'Anio         Obligatorio. Entero entre 2000 y 2100.',
-          'Mes          Obligatorio. Nombre en espanol (Enero..Diciembre) o numero de 1 a 12.',
+          'Año          Obligatorio. Entero entre 2000 y 2100.',
+          'Mes          Obligatorio. Nombre en español (Enero..Diciembre) o numero de 1 a 12.',
           'Generacion   Obligatoria. Energia mensual en kWh. No negativa.',
           'Comentarios  Opcional.',
           'Inversor     Columna adicional recomendada para cargas futuras por dispositivo.',
@@ -612,9 +612,9 @@ export async function plantillaXlsx(formato: FormatoArchivo): Promise<Buffer> {
 /** Archivo de ejemplo con errores deliberados para demostrar la validacion. */
 export function plantillaConErroresCsv(): string {
   return [
-    'Planta,Tipo,Anio,Mes,Generacion,Comentarios',
+    'Planta,Tipo,Año,Mes,Generacion,Comentarios',
     'Planta Demo Norte,PPA,2025,Enero,45200,Fila valida',
-    'Planta Demo Norte,PPA,1899,Febrero,41800,Anio fuera de rango',
+    'Planta Demo Norte,PPA,1899,Febrero,41800,Año fuera de rango',
     'Planta Demo Norte,PPA,2025,Trecemberre,1000,Mes inexistente',
     'Planta Demo Norte,PPA,2025,Marzo,abc,Generacion no numerica',
     'Planta Demo Norte,PPA,2025,Abril,-500,Generacion negativa',
