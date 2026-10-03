@@ -431,7 +431,7 @@ function Asistente({ alCerrar }: { alCerrar: () => void }) {
       {paso === 0 ? (
         <>
           <MensajeInfo titulo="Seleccione el destino de la carga">
-            Para el <strong>formato historico</strong> (Planta, Tipo, Anio, Mes, Generacion) puede dejar los
+            Para el <strong>formato historico</strong> (Planta, Tipo, Año, Mes, Generacion) puede dejar los
             campos vacios: el sistema identifica cada planta por su nombre. Para la{' '}
             <strong>plantilla normalizada</strong> debe elegir al menos el proyecto.
           </MensajeInfo>
@@ -474,13 +474,13 @@ function Asistente({ alCerrar }: { alCerrar: () => void }) {
                 ))}
             </CampoSelect>
             <CampoTexto
-              etiqueta="Anio (solo si el archivo no lo trae)"
+              etiqueta="Año (solo si el archivo no lo trae)"
               type="number"
               min="2000"
               max="2100"
               value={anioForzado}
               placeholder={String(anioActual())}
-              ayuda="El sistema nunca adivina el anio: si el archivo no lo incluye, indiquelo aqui."
+              ayuda="El sistema nunca adivina el año: si el archivo no lo incluye, indiquelo aqui."
               onChange={(e) => setAnioForzado(e.target.value)}
             />
           </div>
