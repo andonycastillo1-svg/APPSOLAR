@@ -26,7 +26,7 @@ export function PaginaIngreso() {
     setDetalle([]);
 
     if (!email.trim() || !password) {
-      setError('Ingrese su correo electronico y su contrasena.');
+      setError('Ingrese su correo electronico y su contraseña.');
       return;
     }
 
@@ -90,7 +90,7 @@ export function PaginaIngreso() {
               placeholder="usuario@retse.com.gt"
             />
             <CampoTexto
-              etiqueta="Contrasena"
+              etiqueta="Contraseña"
               type="password"
               name="password"
               autoComplete="current-password"
@@ -105,7 +105,7 @@ export function PaginaIngreso() {
           </button>
 
           <p style={{ fontSize: '0.76rem', color: 'var(--texto-suave)', marginTop: '1rem', marginBottom: 0 }}>
-            Tras varios intentos fallidos su usuario se bloquea temporalmente. Si olvido su contrasena,
+            Tras varios intentos fallidos su usuario se bloquea temporalmente. Si olvido su contraseña,
             solicite el restablecimiento al administrador del sistema.
           </p>
         </form>
