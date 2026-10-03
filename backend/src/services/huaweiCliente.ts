@@ -22,6 +22,8 @@ export interface RespuestaSincronizacion {
   modo: 'MOCK' | 'REAL';
   registros: RegistroCanonico[];
   advertencias: string[];
+  /** serial (minusculas) -> codigo de estacion descubierto en el fabricante. */
+  estaciones_resueltas?: Record<string, string>;
   duracion_ms: number;
   rango: { desde: string; hasta: string };
 }
