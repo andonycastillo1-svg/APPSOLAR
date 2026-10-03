@@ -397,10 +397,10 @@ export function PaginaTablero() {
               </p>
             </div>
             <div className="indicador">
-              <p className="indicador__etiqueta">Produccion hoy / mes / anio</p>
+              <p className="indicador__etiqueta">Produccion hoy / mes / año</p>
               <p className="indicador__valor">{kwh(datos.produccion.dia_kwh)}</p>
               <p className="indicador__detalle">
-                Mes: {kwh(datos.produccion.mes_kwh)} · Anio: {kwh(datos.produccion.anio_kwh)}
+                Mes: {kwh(datos.produccion.mes_kwh)} · Año: {kwh(datos.produccion.anio_kwh)}
               </p>
             </div>
             <div className="indicador">
