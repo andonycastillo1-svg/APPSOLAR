@@ -1,3 +1,4 @@
+import dns from 'node:dns';
 import { Router } from 'express';
 import { z } from 'zod';
 import { env } from '../../config/env';
@@ -79,10 +80,9 @@ huaweiRouter.get(
           : null,
       pasosParaActivarReal: [
         'Crear una cuenta Northbound en el portal FusionSolar (Sistema > Gestion de la Empresa > Gestion Northbound).',
-        'Definir HUAWEI_USERNAME y HUAWEI_SYSTEM_CODE como variables de entorno del servicio Python.',
+        'Definir HUAWEI_USERNAME y HUAWEI_SYSTEM_CODE como variables de entorno del servidor.',
         'Cambiar HUAWEI_MODE=real y el modo de la configuracion a REAL.',
         'Ejecutar "Probar conexion" antes de la primera sincronizacion.',
-        'Solo si Huawei rechaza la conexion con el error "IP no autorizada": pedir al administrador de FusionSolar que autorice la IP publica de este servidor.',
       ],
     });
   }),
@@ -201,6 +201,57 @@ huaweiRouter.post(
     });
 
     ok(res, resultado);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// GET /integrations/huawei/network-check
+// Diagnostico de salida a internet del servidor (resolucion DNS y conexion HTTPS).
+// ---------------------------------------------------------------------------
+huaweiRouter.get(
+  '/network-check',
+  requierePermiso(PERMISOS.HUAWEI_VER),
+  asyncHandler(async (_req, res) => {
+    const hosts = [
+      'intl.fusionsolar.huawei.com',
+      'eu5.fusionsolar.huawei.com',
+      'la5.fusionsolar.huawei.com',
+      'api.ipify.org',
+      'www.google.com',
+    ];
+
+    const comprobar = async (host: string) => {
+      const resultado: Record<string, unknown> = { host };
+      const t0 = Date.now();
+      try {
+        const r = await dns.promises.lookup(host);
+        resultado.dns = `OK ${r.address}`;
+      } catch (error) {
+        resultado.dns = `ERROR ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`;
+        resultado.https = 'omitido (sin DNS)';
+        resultado.ms = Date.now() - t0;
+        return resultado;
+      }
+      try {
+        const control = new AbortController();
+        const temporizador = setTimeout(() => control.abort(), 6000);
+        const r = await fetch(`https://${host}/`, { method: 'HEAD', signal: control.signal });
+        clearTimeout(temporizador);
+        resultado.https = `OK HTTP ${r.status}`;
+      } catch (error) {
+        const causa = (error as { cause?: { code?: string } }).cause;
+        resultado.https = `ERROR ${causa?.code ?? (error as Error).message}`;
+      }
+      resultado.ms = Date.now() - t0;
+      return resultado;
+    };
+
+    ok(res, {
+      node: process.version,
+      adaptador: env.huawei.adapter,
+      servidoresDns: dns.getServers(),
+      pruebas: await Promise.all(hosts.map(comprobar)),
+    });
   }),
 );
 
