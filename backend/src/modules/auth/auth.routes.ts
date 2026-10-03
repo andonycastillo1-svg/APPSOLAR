@@ -43,12 +43,12 @@ const limitadorLogin = rateLimit({
 
 const esquemaLogin = z.object({
   email: z.string().trim().toLowerCase().email('Ingrese un correo electronico valido.'),
-  password: z.string().min(1, 'Ingrese su contrasena.').max(200),
+  password: z.string().min(1, 'Ingrese su contraseña.').max(200),
 });
 
 const esquemaCambioPassword = z.object({
-  passwordActual: z.string().min(1, 'Ingrese su contrasena actual.').max(200),
-  passwordNueva: z.string().min(1, 'Ingrese la nueva contrasena.').max(200),
+  passwordActual: z.string().min(1, 'Ingrese su contraseña actual.').max(200),
+  passwordNueva: z.string().min(1, 'Ingrese la nueva contraseña.').max(200),
 });
 
 // ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ authRouter.post(
 
     // Respuesta uniforme: no se revela si el correo existe o no.
     const credencialesInvalidas = errores.noAutenticado(
-      'Correo o contrasena incorrectos.',
+      'Correo o contraseña incorrectos.',
     );
 
     if (!registro) {
@@ -122,7 +122,7 @@ authRouter.post(
           ? [intentos, env.auth.loginLockMinutes, registro.id_usuario]
           : [intentos, registro.id_usuario],
       );
-      await fallo(bloquear ? 'Contrasena incorrecta (bloqueo aplicado)' : 'Contrasena incorrecta');
+      await fallo(bloquear ? 'Contraseña incorrecta (bloqueo aplicado)' : 'Contraseña incorrecta');
       throw credencialesInvalidas;
     }
 
@@ -257,18 +257,18 @@ authRouter.post(
         entidad: 'usuarios',
         idEntidad: registro.id_usuario,
         resultado: 'FALLO',
-        motivo: 'Contrasena actual incorrecta',
+        motivo: 'Contraseña actual incorrecta',
       });
-      throw errores.validacion('La contrasena actual no es correcta.');
+      throw errores.validacion('La contraseña actual no es correcta.');
     }
 
     if (passwordActual === passwordNueva) {
-      throw errores.validacion('La nueva contrasena debe ser diferente de la actual.');
+      throw errores.validacion('La nueva contraseña debe ser diferente de la actual.');
     }
 
     const problemas = validarFortalezaPassword(passwordNueva);
     if (problemas.length > 0) {
-      throw errores.validacion('La nueva contrasena no cumple la politica de seguridad.', {
+      throw errores.validacion('La nueva contraseña no cumple la politica de seguridad.', {
         requisitos: problemas,
       });
     }
@@ -292,7 +292,7 @@ authRouter.post(
       idEntidad: registro.id_usuario,
     });
 
-    ok(res, { mensaje: 'Contrasena actualizada correctamente.', csrfToken: csrf });
+    ok(res, { mensaje: 'Contraseña actualizada correctamente.', csrfToken: csrf });
   }),
 );
 
