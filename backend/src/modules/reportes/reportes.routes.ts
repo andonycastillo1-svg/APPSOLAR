@@ -302,7 +302,7 @@ function encabezadoDelReporte(reporte: Reporte) {
         valor: `${formatoLargoEs(reporte.parametros.desde)} al ${formatoLargoEs(reporte.parametros.hasta)}`,
       },
       { etiqueta: 'Granularidad', valor: reporte.parametros.granularidad },
-      { etiqueta: 'Anio de referencia', valor: String(reporte.contexto.anio) },
+      { etiqueta: 'Año de referencia', valor: String(reporte.contexto.anio) },
     ],
     notas: reporte.notas,
   };
