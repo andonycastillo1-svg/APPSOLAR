@@ -28,7 +28,7 @@ export interface UsuarioRegistro {
 }
 
 // ---------------------------------------------------------------------------
-// Contrasenas
+// Contraseñas
 // ---------------------------------------------------------------------------
 
 export async function hashPassword(password: string): Promise<string> {
@@ -43,7 +43,7 @@ export async function verificarPassword(password: string, hash: string): Promise
   }
 }
 
-/** Politica minima de contrasenas, con mensajes en espanol. */
+/** Politica minima de contraseñas, con mensajes en español. */
 export function validarFortalezaPassword(password: string): string[] {
   const problemas: string[] = [];
   if (password.length < 10) problemas.push('Debe tener al menos 10 caracteres.');
@@ -54,7 +54,7 @@ export function validarFortalezaPassword(password: string): string[] {
   return problemas;
 }
 
-/** Contrasena temporal segura para el restablecimiento administrativo. */
+/** Contraseña temporal segura para el restablecimiento administrativo. */
 export function generarPasswordTemporal(): string {
   const mayus = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   const minus = 'abcdefghijkmnopqrstuvwxyz';
