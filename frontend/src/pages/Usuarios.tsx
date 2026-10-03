@@ -249,7 +249,7 @@ export function PaginaUsuarios() {
                   </span>
                   {f.debe_cambiar_password ? (
                     <span className="etiqueta etiqueta--ambar" style={{ marginLeft: '0.3rem' }}>
-                      Debe cambiar contrasena
+                      Debe cambiar contraseña
                     </span>
                   ) : null}
                 </>
@@ -327,8 +327,8 @@ export function PaginaUsuarios() {
           {error ? <MensajeError error={error} /> : null}
           {!editando ? (
             <MensajeInfo>
-              El sistema generara una contrasena temporal segura. El usuario debera cambiarla en su primer
-              ingreso. Las contrasenas existentes nunca se muestran ni se recuperan.
+              El sistema generara una contraseña temporal segura. El usuario debera cambiarla en su primer
+              ingreso. Las contraseñas existentes nunca se muestran ni se recuperan.
             </MensajeInfo>
           ) : null}
           {editando === sesion?.id_usuario ? (
@@ -478,11 +478,11 @@ export function PaginaUsuarios() {
           titulo="Restablecer el acceso del usuario"
           peligroso
           ocupado={ocupado}
-          textoConfirmar="Generar contrasena temporal"
+          textoConfirmar="Generar contraseña temporal"
           descripcion={
             <p>
-              Se generara una contrasena temporal para <strong>{restablecer.nombre}</strong>, se cerraran sus
-              sesiones activas y debera cambiarla al ingresar. La contrasena anterior no se revela en ningun
+              Se generara una contraseña temporal para <strong>{restablecer.nombre}</strong>, se cerraran sus
+              sesiones activas y debera cambiarla al ingresar. La contraseña anterior no se revela en ningun
               momento.
             </p>
           }
@@ -493,15 +493,15 @@ export function PaginaUsuarios() {
 
       {/* --------------------------- Credencial temporal --------------------------- */}
       {credencial ? (
-        <Modal titulo="Contrasena temporal generada" alCerrar={() => setCredencial(null)}>
+        <Modal titulo="Contraseña temporal generada" alCerrar={() => setCredencial(null)}>
           <MensajeAlerta titulo="Se muestra una sola vez">
-            Copie la contrasena y entreguela por un medio seguro. No se volvera a mostrar y no queda
+            Copie la contraseña y entreguela por un medio seguro. No se volvera a mostrar y no queda
             registrada en la auditoria ni en los logs.
           </MensajeAlerta>
           <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.4rem 1rem', fontSize: '0.9rem' }}>
             <dt style={{ fontWeight: 640 }}>Usuario</dt>
             <dd style={{ margin: 0 }}>{credencial.email}</dd>
-            <dt style={{ fontWeight: 640 }}>Contrasena temporal</dt>
+            <dt style={{ fontWeight: 640 }}>Contraseña temporal</dt>
             <dd style={{ margin: 0, fontFamily: 'monospace', fontSize: '1.05rem', letterSpacing: '0.04em' }}>
               {credencial.password}
             </dd>
