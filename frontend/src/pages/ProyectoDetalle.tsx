@@ -1233,7 +1233,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
         <div className="tarjeta__titulo">
           <h2>Tarifas de energia (Q por kWh) · vigencia trimestral</h2>
           <div className="acciones no-imprimir">
-            <CampoSelect etiqueta="Anio" value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
+            <CampoSelect etiqueta="Año" value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
               {anios.map((a) => (
                 <option key={a} value={a}>{a}</option>
               ))}
@@ -1255,7 +1255,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
               <div className="indicador indicador--verde">
                 <p className="indicador__etiqueta">Trimestres aprobados</p>
                 <p className="indicador__valor">{datos.resumen.trimestresAprobados}</p>
-                <p className="indicador__detalle">de 4 en el anio {anio}</p>
+                <p className="indicador__detalle">de 4 en el año {anio}</p>
               </div>
               <div className="indicador indicador--ambar">
                 <p className="indicador__etiqueta">En borrador</p>
@@ -1280,7 +1280,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
 
             <div className="tabla-envoltura">
               <table>
-                <caption>Calendario trimestral de tarifas del anio {anio}.</caption>
+                <caption>Calendario trimestral de tarifas del año {anio}.</caption>
                 <thead>
                   <tr>
                     <th scope="col">Trimestre</th>
@@ -1920,7 +1920,7 @@ function PanelProyecciones({ idProyecto }: { idProyecto: number }) {
         <div className="tarjeta__titulo">
           <h2>Proyecciones mensuales de generacion (kWh)</h2>
           <div className="acciones no-imprimir">
-            <CampoSelect etiqueta="Anio" value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
+            <CampoSelect etiqueta="Año" value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
               {anios.map((a) => (
                 <option key={a} value={a}>{a}</option>
               ))}
@@ -1974,7 +1974,7 @@ function PanelProyecciones({ idProyecto }: { idProyecto: number }) {
                 <p className="indicador__detalle">{datos.totales.mesesAprobados} mes(es) aprobados</p>
               </div>
               <div className="indicador">
-                <p className="indicador__etiqueta">Generacion real del anio</p>
+                <p className="indicador__etiqueta">Generacion real del año</p>
                 <p className="indicador__valor">{kwh(datos.totales.generacion_kwh)}</p>
               </div>
               <div
@@ -1999,7 +1999,7 @@ function PanelProyecciones({ idProyecto }: { idProyecto: number }) {
 
             <div className="tabla-envoltura">
               <table>
-                <caption>Calendario anual de proyecciones del anio {anio}.</caption>
+                <caption>Calendario anual de proyecciones del año {anio}.</caption>
                 <thead>
                   <tr>
                     <th scope="col">Mes</th>
@@ -2091,12 +2091,12 @@ function PanelProyecciones({ idProyecto }: { idProyecto: number }) {
 
       {copia ? (
         <Confirmacion
-          titulo={`Copiar proyecciones al anio ${anio}`}
+          titulo={`Copiar proyecciones al año ${anio}`}
           textoConfirmar="Copiar como borrador"
           ocupado={mutacion.isPending}
           descripcion={
             <p>
-              Se copiaran las proyecciones del anio de origen como <strong>borradores</strong> del anio{' '}
+              Se copiaran las proyecciones del año de origen como <strong>borradores</strong> del año{' '}
               {anio}. Los meses que ya tengan proyeccion no se sobrescriben.
             </p>
           }
@@ -2119,7 +2119,7 @@ function PanelProyecciones({ idProyecto }: { idProyecto: number }) {
         >
           <div className="formulario" style={{ marginTop: '0.8rem' }}>
             <CampoTexto
-              etiqueta="Anio de origen"
+              etiqueta="Año de origen"
               type="number"
               min="2000"
               max="2100"
