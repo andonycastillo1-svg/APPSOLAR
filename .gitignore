@@ -18,3 +18,8 @@ venv/
 .vite/
 .DS_Store
 Thumbs.db
+
+# Paquete de hosting generado
+hosting/paquete/
+hosting/*.zip
+hosting/hostinger.env
