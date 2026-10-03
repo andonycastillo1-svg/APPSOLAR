@@ -164,17 +164,6 @@ export function PaginaEstado() {
               <dd style={{ margin: 0 }}>{datos.horaLocal}</dd>
             </dl>
           </section>
-
-          <section className="tarjeta">
-            <h2>Respaldo y restauracion</h2>
-            <p style={{ fontSize: '0.88rem' }}>
-              Los procedimientos de respaldo y restauracion de MySQL y de los archivos de importacion estan
-              documentados en <code>docs/operacion.md</code> y automatizados en los scripts{' '}
-              <code>database/scripts/respaldo.sh</code> y <code>database/scripts/restaurar.sh</code>. Este
-              panel no ejecuta respaldos: esa operacion se realiza desde el servidor con las credenciales
-              administrativas correspondientes.
-            </p>
-          </section>
         </>
       ) : null}
     </>
