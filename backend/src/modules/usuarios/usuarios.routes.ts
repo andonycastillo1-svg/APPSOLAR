@@ -186,7 +186,7 @@ usuariosRouter.post(
     if (datos.password) {
       const problemas = validarFortalezaPassword(datos.password);
       if (problemas.length > 0) {
-        throw errores.validacion('La contrasena no cumple la politica de seguridad.', {
+        throw errores.validacion('La contraseña no cumple la politica de seguridad.', {
           requisitos: problemas,
         });
       }
@@ -219,8 +219,8 @@ usuariosRouter.post(
       // Se entrega una sola vez al administrador para su comunicacion segura.
       passwordTemporal: datos.password ? undefined : passwordInicial,
       mensaje: datos.password
-        ? 'Usuario creado. Debera cambiar la contrasena en su primer ingreso.'
-        : 'Usuario creado. Entregue la contrasena temporal por un medio seguro.',
+        ? 'Usuario creado. Debera cambiar la contraseña en su primer ingreso.'
+        : 'Usuario creado. Entregue la contraseña temporal por un medio seguro.',
     });
   }),
 );
@@ -360,11 +360,11 @@ usuariosRouter.post(
       motivo: 'Restablecimiento administrativo',
     });
 
-    // La contrasena anterior nunca se revela ni se registra.
+    // La contraseña anterior nunca se revela ni se registra.
     ok(res, {
       passwordTemporal: temporal,
       mensaje:
-        'Contrasena restablecida. Entreguela por un medio seguro; el usuario debera cambiarla al ingresar.',
+        'Contraseña restablecida. Entreguela por un medio seguro; el usuario debera cambiarla al ingresar.',
     });
   }),
 );
