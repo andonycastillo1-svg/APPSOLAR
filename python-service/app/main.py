@@ -181,6 +181,7 @@ async def produccion(
         "modo": peticion.config.modo,
         "registros": [r.a_dict() for r in resultado.registros],
         "advertencias": resultado.advertencias,
+        "estaciones_resueltas": resultado.estaciones_resueltas,
         "duracion_ms": duracion,
         "rango": {"desde": peticion.desde.isoformat(), "hasta": peticion.hasta.isoformat()},
     }
