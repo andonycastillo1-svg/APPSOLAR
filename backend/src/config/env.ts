@@ -8,7 +8,10 @@ import dotenv from 'dotenv';
  * backend, de modo que un despliegue pueda separar la configuracion por
  * servicio sin duplicar valores comunes.
  */
-const rootDir = path.resolve(__dirname, '..', '..', '..');
+// APP_ROOT permite fijar la raiz cuando el codigo compilado vive en otra ruta (hosting).
+const rootDir = process.env.APP_ROOT
+  ? path.resolve(process.env.APP_ROOT)
+  : path.resolve(__dirname, '..', '..', '..');
 for (const candidate of [
   path.join(rootDir, '.env'),
   path.join(rootDir, 'backend', '.env'),
@@ -60,6 +63,9 @@ function secret(key: string, devFallback: string): string {
   return value;
 }
 
+/** Via de integracion Huawei: servicio Python interno (local) o adaptador nativo en Node. */
+const adaptadorHuawei = str('HUAWEI_ADAPTER', 'python').toLowerCase() === 'node' ? 'node' : 'python';
+
 export const env = {
   nodeEnv,
   isProduction,
@@ -107,6 +113,7 @@ export const env = {
   uploads: {
     dir: path.resolve(rootDir, str('UPLOAD_DIR', './storage/uploads')),
     maxMb: num('MAX_UPLOAD_MB', 10),
+    maxBackupMb: num('MAX_BACKUP_MB', 50),
     allowedExt: str('ALLOWED_UPLOAD_EXT', '.csv,.xlsx')
       .split(',')
       .map((e) => e.trim().toLowerCase()),
@@ -114,7 +121,10 @@ export const env = {
 
   python: {
     url: str('PYTHON_SERVICE_URL', 'http://127.0.0.1:8000'),
-    token: secret('PYTHON_SERVICE_TOKEN', 'token-interno-desarrollo'),
+    token:
+      adaptadorHuawei === 'python'
+        ? secret('PYTHON_SERVICE_TOKEN', 'token-interno-desarrollo')
+        : process.env.PYTHON_SERVICE_TOKEN || 'no-aplica',
     timeoutMs: num('PYTHON_SERVICE_TIMEOUT_MS', 45000),
   },
 
@@ -122,7 +132,13 @@ export const env = {
     mode: (str('HUAWEI_MODE', 'mock').toLowerCase() === 'real' ? 'REAL' : 'MOCK') as 'REAL' | 'MOCK',
     baseUrl: str('HUAWEI_BASE_URL', 'https://intl.fusionsolar.huawei.com/thirdData'),
     authorizedIp: process.env.HUAWEI_AUTHORIZED_IP || '',
+    adapter: adaptadorHuawei as 'python' | 'node',
+    username: process.env.HUAWEI_USERNAME || '',
+    systemCode: process.env.HUAWEI_SYSTEM_CODE || '',
   },
+
+  // Aplica migraciones y crea el administrador al iniciar (hosting sin terminal).
+  autoMigrate: bool('AUTO_MIGRATE', false),
 
   sync: {
     cronEnabled: bool('SYNC_CRON_ENABLED', false),
