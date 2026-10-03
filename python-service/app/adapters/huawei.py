@@ -242,14 +242,45 @@ class HuaweiSmartPVMSAdapter(AdaptadorFabricante):
             # devTypeId: 1 = inversor string, 38 = inversor residencial. El KPI
             # solo responde si el tipo enviado coincide con el del dispositivo.
             tipo_por_id: dict[str, int] = {}
-            for estacion in estaciones or []:
-                cuerpo = await self._peticion(cliente, "/getDevList", {"stationCodes": estacion})
-                for dispositivo in cuerpo.get("data") or []:
-                    sn = str(dispositivo.get("esnCode") or dispositivo.get("devDn") or "")
-                    if sn:
+
+            async def cargar_dispositivos(codigos: list[str]) -> None:
+                # getDevList admite hasta 100 estaciones por llamada.
+                for inicio in range(0, len(codigos), 100):
+                    lote = codigos[inicio : inicio + 100]
+                    cuerpo = await self._peticion(
+                        cliente, "/getDevList", {"stationCodes": ",".join(lote)}
+                    )
+                    for dispositivo in cuerpo.get("data") or []:
+                        sn = str(dispositivo.get("esnCode") or dispositivo.get("devDn") or "")
+                        if not sn:
+                            continue
                         dev_id = str(dispositivo.get("id"))
                         mapa_dispositivos[sn.lower()] = dev_id
                         tipo_por_id[dev_id] = int(dispositivo.get("devTypeId") or 1)
+                        codigo_estacion = dispositivo.get("stationCode")
+                        if codigo_estacion:
+                            resultado.estaciones_resueltas[sn.lower()] = str(codigo_estacion)
+
+            if estaciones:
+                await cargar_dispositivos(list(estaciones))
+
+            # Sin estacion declarada (o serial no hallado en ella): se descubre
+            # recorriendo las estaciones de la cuenta. El resultado se devuelve
+            # para que el backend lo guarde y la proxima vez baste una llamada.
+            if any(s.lower() not in mapa_dispositivos for s in seriales):
+                lista = await self._peticion(cliente, "/getStationList", {})
+                codigos = [
+                    str(e.get("stationCode"))
+                    for e in (lista.get("data") or [])
+                    if e.get("stationCode") and str(e.get("stationCode")) not in set(estaciones or [])
+                ]
+                await cargar_dispositivos(codigos)
+
+            # Solo se devuelven las estaciones de los seriales pedidos.
+            pedidos = {s.lower() for s in seriales}
+            resultado.estaciones_resueltas = {
+                k: v for k, v in resultado.estaciones_resueltas.items() if k in pedidos
+            }
 
             faltantes = [s for s in seriales if s.lower() not in mapa_dispositivos]
             if faltantes:
@@ -269,10 +300,14 @@ class HuaweiSmartPVMSAdapter(AdaptadorFabricante):
             vistos: set[tuple[str, str]] = set()
 
             while actual <= hasta:
-                marca_tiempo = int(
-                    datetime(actual.year, actual.month, actual.day, tzinfo=timezone.utc).timestamp()
-                    * 1000
+                # Se consulta a mitad del periodo: Huawei interpreta la hora en la zona
+                # de la planta, y a medianoche UTC caeria en el periodo anterior.
+                referencia = (
+                    datetime(actual.year, actual.month, 15, 12, tzinfo=timezone.utc)
+                    if granularidad == "DIARIA"
+                    else datetime(actual.year, 7, 1, 12, tzinfo=timezone.utc)
                 )
+                marca_tiempo = int(referencia.timestamp() * 1000)
                 ruta = "/getDevKpiDay" if granularidad == "DIARIA" else "/getDevKpiMonth"
                 filas_kpi: list[dict] = []
                 for tipo in sorted({tipo_por_id.get(i, 1) for i in ids}):
