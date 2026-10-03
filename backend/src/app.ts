@@ -25,6 +25,7 @@ import { huaweiRouter } from './modules/integracion/huawei.routes';
 import { dashboardRouter } from './modules/dashboard/dashboard.routes';
 import { reportesRouter } from './modules/reportes/reportes.routes';
 import { auditoriaRouter, configuracionRouter, saludRouter } from './modules/sistema/sistema.routes';
+import { respaldosRouter } from './modules/respaldos/respaldos.routes';
 
 export function crearApp() {
   const app = express();
@@ -141,6 +142,7 @@ export function crearApp() {
   app.use(`${env.apiPrefix}/dashboard`, dashboardRouter);
   app.use(`${env.apiPrefix}/reports`, reportesRouter);
   app.use(`${env.apiPrefix}/audit`, auditoriaRouter);
+  app.use(`${env.apiPrefix}/config/backup`, respaldosRouter);
   app.use(`${env.apiPrefix}/config`, configuracionRouter);
 
   // Documentacion OpenAPI (servida como archivo estatico del repositorio).
