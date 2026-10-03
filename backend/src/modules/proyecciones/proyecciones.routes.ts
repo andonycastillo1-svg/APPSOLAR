@@ -223,7 +223,7 @@ proyeccionesRouter.post(
     const { anioOrigen, anioDestino, factor } = req.body as z.infer<typeof esquemaCopia>;
 
     if (anioOrigen === anioDestino) {
-      throw errores.validacion('El anio de origen y el de destino deben ser diferentes.');
+      throw errores.validacion('El año de origen y el de destino deben ser diferentes.');
     }
 
     const origen = await query<{ mes: number; proyeccion_kwh: number }>(
@@ -232,7 +232,7 @@ proyeccionesRouter.post(
       [idProyecto, anioOrigen],
     );
     if (origen.length === 0) {
-      throw errores.reglaNegocio(`El anio ${anioOrigen} no tiene proyecciones registradas.`);
+      throw errores.reglaNegocio(`El año ${anioOrigen} no tiene proyecciones registradas.`);
     }
 
     let copiadas = 0;
@@ -342,7 +342,7 @@ proyeccionesRouter.post(
 
     ok(res, {
       aprobadas: resultado.affectedRows,
-      mensaje: `Se aprobaron ${resultado.affectedRows} proyeccion(es) del anio ${anio}.`,
+      mensaje: `Se aprobaron ${resultado.affectedRows} proyeccion(es) del año ${anio}.`,
     });
   }),
 );
