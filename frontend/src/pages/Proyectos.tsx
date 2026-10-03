@@ -531,7 +531,7 @@ export function PaginaProyectos() {
                 </MensajeInfo>
                 <div className="formulario">
                   <CampoTexto
-                    etiqueta="Anio de la proyeccion"
+                    etiqueta="Año de la proyeccion"
                     type="number"
                     min="2000"
                     max="2100"
