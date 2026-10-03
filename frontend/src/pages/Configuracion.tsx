@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, descargar } from '../lib/api';
 import { useSesion } from '../lib/auth';
 import { Cargando, MensajeError, MensajeExito, MensajeInfo } from '../components/Estados';
 import { fechaHora } from '../lib/formato';
@@ -25,6 +25,110 @@ const TITULOS: Record<string, string> = {
   REPORTES: 'Reportes y formato',
   GENERAL: 'General',
 };
+
+function SeccionRespaldos() {
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [confirmacion, setConfirmacion] = useState('');
+  const [descargando, setDescargando] = useState(false);
+  const [restaurando, setRestaurando] = useState(false);
+  const [exito, setExito] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  const descargarCopia = async () => {
+    setDescargando(true);
+    setError(null);
+    setExito(null);
+    try {
+      await descargar('/config/backup/download');
+      setExito('Copia de respaldo descargada. Guardela en un lugar seguro y fuera de este servidor.');
+    } catch (fallo) {
+      setError(fallo);
+    } finally {
+      setDescargando(false);
+    }
+  };
+
+  const restaurar = async () => {
+    if (!archivo) return;
+    setRestaurando(true);
+    setError(null);
+    setExito(null);
+    try {
+      const formulario = new FormData();
+      formulario.append('archivo', archivo);
+      formulario.append('confirmacion', confirmacion);
+      const respuesta = await api.subir<{ mensaje: string }>('/config/backup/restore', formulario);
+      setExito(respuesta.datos.mensaje);
+      setArchivo(null);
+      setConfirmacion('');
+      window.setTimeout(() => window.location.assign('/ingresar'), 3500);
+    } catch (fallo) {
+      setError(fallo);
+    } finally {
+      setRestaurando(false);
+    }
+  };
+
+  return (
+    <section className="tarjeta" aria-labelledby="titulo-respaldos">
+      <h2 id="titulo-respaldos">Respaldos</h2>
+      <p style={{ fontSize: '0.88rem' }}>
+        Descargue una copia completa de los datos del sistema (clientes, proyectos, inversores, produccion,
+        tarifas, proyecciones, usuarios y configuracion) o restaure una copia generada anteriormente.
+      </p>
+
+      {exito ? <MensajeExito>{exito}</MensajeExito> : null}
+      {error ? <MensajeError error={error} /> : null}
+
+      <h3 style={{ marginTop: '1rem' }}>Descargar una copia</h3>
+      <p style={{ fontSize: '0.84rem', color: 'var(--texto-suave)' }}>
+        El archivo contiene informacion sensible, incluidas las contraseñas cifradas de los usuarios:
+        guardelo en un lugar seguro. No incluye las sesiones activas ni los archivos originales cargados.
+      </p>
+      <button type="button" className="boton" disabled={descargando} onClick={() => void descargarCopia()}>
+        {descargando ? 'Generando copia...' : 'Descargar copia de respaldo'}
+      </button>
+
+      <h3 style={{ marginTop: '1.6rem' }}>Restaurar desde un respaldo</h3>
+      <MensajeInfo>
+        Esta accion <strong>reemplaza todos los datos actuales</strong> por los del archivo. Antes de
+        hacerlo el sistema guarda automaticamente una copia previa en el servidor. Al terminar tendra que
+        iniciar sesion de nuevo. Solo se aceptan respaldos generados por este sistema y con la misma
+        version de estructura de datos.
+      </MensajeInfo>
+
+      <div style={{ display: 'grid', gap: '0.7rem', maxWidth: '460px', marginTop: '0.7rem' }}>
+        <label>
+          Archivo de respaldo (.json)
+          <input
+            type="file"
+            accept=".json,application/json"
+            onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
+          />
+        </label>
+        <label>
+          Escriba <strong>RESTAURAR</strong> para confirmar
+          <input
+            type="text"
+            autoComplete="off"
+            value={confirmacion}
+            onChange={(e) => setConfirmacion(e.target.value)}
+          />
+        </label>
+        <div>
+          <button
+            type="button"
+            className="boton boton--peligro"
+            disabled={!archivo || confirmacion !== 'RESTAURAR' || restaurando}
+            onClick={() => void restaurar()}
+          >
+            {restaurando ? 'Restaurando...' : 'Restaurar respaldo'}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export function PaginaConfiguracion() {
   const { puede } = useSesion();
@@ -87,6 +191,8 @@ export function PaginaConfiguracion() {
           administrativo.
         </MensajeInfo>
       ) : null}
+
+      {gestionar ? <SeccionRespaldos /> : null}
 
       {consulta.isLoading ? <Cargando /> : null}
       {consulta.error ? <MensajeError error={consulta.error} alReintentar={() => void consulta.refetch()} /> : null}
