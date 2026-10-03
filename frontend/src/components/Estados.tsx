@@ -133,7 +133,7 @@ export function MensajeInfo({ titulo, children }: { titulo?: string; children: R
   );
 }
 
-/** Anuncia mensajes a lectores de pantalla sin alterar el diseno. */
+/** Anuncia mensajes a lectores de pantalla sin alterar el diseño. */
 export function Anuncio({ mensaje }: { mensaje: string | null }) {
   return (
     <div className="solo-lectores" role="status" aria-live="polite" aria-atomic="true">
