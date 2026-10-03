@@ -153,6 +153,18 @@ export async function ejecutarSincronizacion(
         });
 
         const porSerial = new Map(inversores.map((i) => [i.serial_externo.toLowerCase(), i]));
+
+        // La estacion se descubre sola a partir del serial: se guarda para que
+        // las siguientes sincronizaciones no tengan que volver a buscarla.
+        for (const [serial, estacion] of Object.entries(respuesta.estaciones_resueltas ?? {})) {
+          const inversor = porSerial.get(serial);
+          if (inversor && !inversor.estacion_externa) {
+            await execute('UPDATE inversores SET estacion_externa = ? WHERE id_inversor = ?', [
+              estacion.slice(0, 80),
+              inversor.id_inversor,
+            ]);
+          }
+        }
         let insertadas = 0;
         let actualizadas = 0;
         let rechazadas = 0;
