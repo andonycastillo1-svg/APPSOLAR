@@ -1,6 +1,11 @@
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { AppError } from '../utils/errors';
+import {
+  ErrorAdaptador,
+  obtenerProduccionNativo,
+  probarConexionNativo,
+} from './huaweiNativo';
 
 /**
  * Cliente del servicio Python interno (adaptador Huawei SmartPVMS).
@@ -36,7 +41,7 @@ export interface RespuestaPrueba {
   detalle?: Record<string, unknown>;
 }
 
-/** Traduce los codigos del adaptador a mensajes diferenciados en espanol. */
+/** Traduce los codigos del adaptador a mensajes diferenciados en español. */
 const MENSAJES: Record<string, { status: number; mensaje: string }> = {
   CREDENCIALES_INVALIDAS: {
     status: 401,
@@ -132,7 +137,29 @@ export interface ConfiguracionAdaptador {
   max_reintentos: number;
 }
 
+/** Ejecuta el adaptador nativo traduciendo sus errores a los del sistema. */
+async function conAdaptadorNativo<T>(accion: () => Promise<T>): Promise<T> {
+  try {
+    return await accion();
+  } catch (error) {
+    if (error instanceof ErrorAdaptador) {
+      logger.warn(
+        { codigo: error.codigo, detalle: error.detalle },
+        `Adaptador Huawei nativo: ${error.message}`,
+      );
+      const traducido = traducir(error.codigo, error.detalle);
+      // El motivo tecnico (por ejemplo ENOTFOUND o ETIMEDOUT) ayuda al administrador a diagnosticar.
+      if (error.codigo === 'SERVICIO_NO_DISPONIBLE') {
+        throw new AppError(traducido.status, traducido.codigo, `${traducido.message} ${error.message}`, error.detalle);
+      }
+      throw traducido;
+    }
+    throw error;
+  }
+}
+
 export async function probarConexion(config: ConfiguracionAdaptador): Promise<RespuestaPrueba> {
+  if (env.huawei.adapter === 'node') return conAdaptadorNativo(() => probarConexionNativo(config));
   return llamar<RespuestaPrueba>('/huawei/test', { config }, env.python.timeoutMs);
 }
 
@@ -146,6 +173,9 @@ export async function obtenerProduccion(
     granularidad: 'DIARIA' | 'MENSUAL';
   },
 ): Promise<RespuestaSincronizacion> {
+  if (env.huawei.adapter === 'node') {
+    return conAdaptadorNativo(() => obtenerProduccionNativo(config, parametros));
+  }
   return llamar<RespuestaSincronizacion>(
     '/huawei/production',
     { config, ...parametros },
@@ -154,6 +184,7 @@ export async function obtenerProduccion(
 }
 
 export async function saludServicio(): Promise<{ ok: boolean; version?: string; modo?: string }> {
+  if (env.huawei.adapter === 'node') return { ok: true, version: 'nativo', modo: env.huawei.mode };
   try {
     const control = new AbortController();
     const temporizador = setTimeout(() => control.abort(), 4000);
