@@ -2,7 +2,7 @@ import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { closePool } from './pool';
 import { createDatabase, dropDatabase, runMigrations } from './migrator';
-import { bootstrapAdministrador, sembrarDemostracion } from './seed';
+import { asegurarIntegracionHuawei, bootstrapAdministrador, sembrarDemostracion } from './seed';
 
 /**
  * CLI de base de datos.
@@ -31,6 +31,7 @@ async function principal(): Promise<void> {
 
     case 'bootstrap':
       await bootstrapAdministrador();
+      await asegurarIntegracionHuawei();
       break;
 
     case 'seed':
