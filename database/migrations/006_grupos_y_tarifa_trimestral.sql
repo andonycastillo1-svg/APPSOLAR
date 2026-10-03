@@ -121,7 +121,7 @@ ALTER TABLE produccion
   ADD CONSTRAINT fk_prod_grupo FOREIGN KEY (id_grupo) REFERENCES grupos(id_grupo);
 
 ALTER TABLE produccion
-  DROP CHECK ck_prod_nivel,
+  DROP CONSTRAINT ck_prod_nivel,
   ADD CONSTRAINT ck_prod_nivel CHECK (
     (nivel_detalle = 'POR_INVERSOR'         AND id_inversor IS NOT NULL AND id_grupo IS NOT NULL) OR
     (nivel_detalle = 'GRUPO_CONSOLIDADO'    AND id_inversor IS NULL     AND id_grupo IS NOT NULL) OR
