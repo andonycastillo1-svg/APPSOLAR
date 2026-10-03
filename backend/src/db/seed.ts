@@ -25,14 +25,14 @@ export async function bootstrapAdministrador(): Promise<void> {
   if (!password) {
     throw new Error(
       'Defina BOOTSTRAP_ADMIN_PASSWORD en el entorno para crear el administrador inicial. ' +
-        'No existe ninguna contrasena por defecto.',
+        'No existe ninguna contraseña por defecto.',
     );
   }
 
   const problemas = validarFortalezaPassword(password);
   if (problemas.length > 0) {
     throw new Error(
-      `La contrasena de BOOTSTRAP_ADMIN_PASSWORD no cumple la politica de seguridad: ${problemas.join(' ')}`,
+      `La contraseña de BOOTSTRAP_ADMIN_PASSWORD no cumple la politica de seguridad: ${problemas.join(' ')}`,
     );
   }
 
@@ -75,6 +75,43 @@ interface DemoContexto {
 const ESTACIONALIDAD = [1.02, 1.06, 1.12, 1.05, 0.92, 0.82, 0.88, 0.9, 0.85, 0.9, 0.98, 1.0];
 
 /** Generador pseudoaleatorio determinista para que la demo sea reproducible. */
+/**
+ * Garantiza que exista la configuracion de la integracion Huawei (necesaria para
+ * probar la conexion y sincronizar). Es idempotente y NO guarda credenciales:
+ * solo la referencia a la variable de entorno donde viven.
+ */
+export async function asegurarIntegracionHuawei(): Promise<void> {
+  const existente = await queryOne<{ id_api: number }>(
+    "SELECT id_api FROM apis_fabricante WHERE marca = 'HUAWEI' ORDER BY id_api LIMIT 1",
+  );
+  if (existente) {
+    // Inversores Huawei creados antes de que existiera la integracion.
+    await execute(
+      "UPDATE inversores SET id_api = ? WHERE tipo_conexion = 'HUAWEI_API' AND id_api IS NULL",
+      [existente.id_api],
+    );
+    return;
+  }
+
+  const creada = await execute(
+    `INSERT INTO apis_fabricante
+       (marca, nombre, endpoint, ip_autorizada, usuario_api, secreto_ref, modo, estado,
+        timeout_s, max_reintentos, sync_programada, sync_hora)
+     VALUES ('HUAWEI', 'Huawei SmartPVMS', ?, ?, ?, 'env:HUAWEI_SYSTEM_CODE', ?, 'ACTIVA', 40, 3, 0, '02:30')`,
+    [
+      env.huawei.baseUrl,
+      env.huawei.authorizedIp || null,
+      env.huawei.username || null,
+      env.huawei.mode,
+    ],
+  );
+  await execute(
+    "UPDATE inversores SET id_api = ? WHERE tipo_conexion = 'HUAWEI_API' AND id_api IS NULL",
+    [creada.insertId],
+  );
+  logger.info('Configuracion de la integracion Huawei creada.');
+}
+
 function aleatorio(semilla: number): () => number {
   let estado = semilla;
   return () => {
@@ -708,7 +745,7 @@ export async function sembrarDemostracion(): Promise<void> {
   ).insertId;
 
   const erroresDemo = [
-    [2, 'Anio', '1899', 'ANIO_INVALIDO', 'ERROR', 'El anio debe ser un entero valido entre 2000 y 2100.'],
+    [2, 'Año', '1899', 'ANIO_INVALIDO', 'ERROR', 'El año debe ser un entero valido entre 2000 y 2100.'],
     [3, 'Mes', 'Trecemberre', 'MES_INVALIDO', 'ERROR', 'El mes no se reconocio.'],
     [4, 'Generacion', 'abc', 'KWH_NO_NUMERICO', 'ERROR', 'La generacion debe ser un valor numerico en kWh.'],
     [5, 'Generacion', '-500', 'KWH_NEGATIVO', 'ERROR', 'No se aceptan valores de energia negativos.'],
