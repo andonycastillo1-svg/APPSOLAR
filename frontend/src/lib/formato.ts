@@ -1,5 +1,5 @@
 /**
- * Formato de presentacion en espanol de Guatemala.
+ * Formato de presentacion en español de Guatemala.
  * Energia en kWh, potencia instalada en kWp, moneda GTQ (Q),
  * fechas visibles en dd/mm/aaaa y zona horaria America/Guatemala.
  */
