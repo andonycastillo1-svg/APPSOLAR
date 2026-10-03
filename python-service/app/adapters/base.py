@@ -60,6 +60,8 @@ class RegistroCanonico:
 class ResultadoProduccion:
     registros: list[RegistroCanonico] = field(default_factory=list)
     advertencias: list[str] = field(default_factory=list)
+    # serial (minusculas) -> codigo de estacion descubierto en el fabricante.
+    estaciones_resueltas: dict[str, str] = field(default_factory=dict)
 
 
 class AdaptadorFabricante(ABC):
