@@ -132,8 +132,8 @@ export function Layout() {
 
       <main className="contenido" id="contenido-principal" tabIndex={-1}>
         {debeCambiarPassword && ubicacion.pathname !== '/perfil' ? (
-          <MensajeAlerta titulo="Debe cambiar su contrasena">
-            Su contrasena fue asignada por un administrador.{' '}
+          <MensajeAlerta titulo="Debe cambiar su contraseña">
+            Su contraseña fue asignada por un administrador.{' '}
             <a href="/perfil" onClick={(e) => { e.preventDefault(); navegar('/perfil'); }}>
               Cambiela ahora
             </a>{' '}
