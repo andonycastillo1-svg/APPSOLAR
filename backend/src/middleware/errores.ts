@@ -14,7 +14,7 @@ export interface RespuestaError {
   };
 }
 
-/** Traduce los errores de Zod a mensajes en espanol por campo. */
+/** Traduce los errores de Zod a mensajes en español por campo. */
 function detallesZod(error: ZodError) {
   return error.errors.map((e) => ({
     campo: e.path.join('.') || '(cuerpo)',
