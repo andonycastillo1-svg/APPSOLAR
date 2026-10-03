@@ -49,7 +49,7 @@ export function PaginaAuditoria() {
       </div>
 
       <MensajeInfo>
-        Por politica de seguridad, la auditoria <strong>nunca</strong> registra contrasenas, tokens ni el
+        Por politica de seguridad, la auditoria <strong>nunca</strong> registra contraseñas, tokens ni el
         contenido completo de los archivos. Los campos sensibles aparecen como <code>[REDACTADO]</code>.
       </MensajeInfo>
 
