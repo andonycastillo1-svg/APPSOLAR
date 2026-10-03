@@ -198,7 +198,7 @@ export async function descargar(
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-/** Abre un PDF del API en una pestana nueva para visualizarlo o imprimirlo. */
+/** Abre un PDF del API en una pestaña nueva para visualizarlo o imprimirlo. */
 export async function abrirEnPestana(
   ruta: string,
   parametros?: OpcionesPeticion['parametros'],
