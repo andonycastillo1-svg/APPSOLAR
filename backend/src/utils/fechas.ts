@@ -32,7 +32,7 @@ function quitarAcentos(texto: string): string {
   return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-/** Normaliza un mes escrito en espanol o como numero a 1..12. */
+/** Normaliza un mes escrito en español o como numero a 1..12. */
 export function normalizarMes(entrada: unknown): number | null {
   if (entrada === null || entrada === undefined || entrada === '') return null;
 
