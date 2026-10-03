@@ -290,8 +290,8 @@ export function PaginaIntegracion() {
           </dl>
 
           <MensajeInfo titulo="Las credenciales nunca se almacenan en la base de datos">
-            El usuario y el <code>systemCode</code> viven unicamente como variables de entorno del servicio
-            Python interno. La base de datos guarda solo una referencia al lugar donde residen.
+            El usuario y el <code>systemCode</code> viven unicamente como variables de entorno del
+            servidor. La base de datos guarda solo una referencia al lugar donde residen.
           </MensajeInfo>
         </section>
       ))}
@@ -526,8 +526,8 @@ export function PaginaIntegracion() {
           alCancelar={() => setEditar(null)}
           descripcion={
             <MensajeInfo>
-              El modo <strong>REAL</strong> exige credenciales validas en el entorno del servicio Python y la
-              IP publica del servidor previamente autorizada por Huawei.
+              El modo <strong>REAL</strong> se conecta a la plataforma de Huawei con las credenciales
+              configuradas en el entorno del servidor.
             </MensajeInfo>
           }
         >
@@ -552,7 +552,7 @@ export function PaginaIntegracion() {
             <CampoTexto
               etiqueta="Usuario del API"
               value={editar.usuario_api ?? ''}
-              ayuda="La contrasena o systemCode nunca se captura aqui: vive en el entorno del servicio."
+              ayuda="La contraseña o systemCode nunca se captura aqui: vive en el entorno del servicio."
               onChange={(e) => setEditar({ ...editar, usuario_api: e.target.value })}
             />
             <CampoSelect
