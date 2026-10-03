@@ -26,7 +26,7 @@ export function PaginaPerfil() {
     setExito(null);
 
     if (nueva !== confirmacion) {
-      setError(new Error('La nueva contrasena y su confirmacion no coinciden.'));
+      setError(new Error('La nueva contraseña y su confirmacion no coinciden.'));
       return;
     }
 
@@ -87,11 +87,11 @@ export function PaginaPerfil() {
       </section>
 
       <section className="tarjeta">
-        <h2>Cambiar contrasena</h2>
+        <h2>Cambiar contraseña</h2>
 
         {debeCambiarPassword ? (
-          <MensajeAlerta titulo="Cambio de contrasena requerido">
-            Su contrasena fue asignada por un administrador. Debe reemplazarla por una propia antes de
+          <MensajeAlerta titulo="Cambio de contraseña requerido">
+            Su contraseña fue asignada por un administrador. Debe reemplazarla por una propia antes de
             continuar utilizando el sistema.
           </MensajeAlerta>
         ) : null}
@@ -99,7 +99,7 @@ export function PaginaPerfil() {
         {exito ? <MensajeExito>{exito}</MensajeExito> : null}
         {error ? <MensajeError error={error} /> : null}
 
-        <MensajeInfo titulo="Politica de contrasenas">
+        <MensajeInfo titulo="Politica de contraseñas">
           Minimo 10 caracteres, con al menos una mayuscula, una minuscula, un numero y un caracter
           especial. Al cambiarla se cerraran sus demas sesiones activas.
         </MensajeInfo>
@@ -107,7 +107,7 @@ export function PaginaPerfil() {
         <form onSubmit={enviar} noValidate>
           <div className="formulario">
             <CampoTexto
-              etiqueta="Contrasena actual"
+              etiqueta="Contraseña actual"
               type="password"
               autoComplete="current-password"
               obligatorio
@@ -116,7 +116,7 @@ export function PaginaPerfil() {
               onChange={(e) => setActual(e.target.value)}
             />
             <CampoTexto
-              etiqueta="Nueva contrasena"
+              etiqueta="Nueva contraseña"
               type="password"
               autoComplete="new-password"
               obligatorio
@@ -125,7 +125,7 @@ export function PaginaPerfil() {
               onChange={(e) => setNueva(e.target.value)}
             />
             <CampoTexto
-              etiqueta="Confirmar nueva contrasena"
+              etiqueta="Confirmar nueva contraseña"
               type="password"
               autoComplete="new-password"
               obligatorio
@@ -135,7 +135,7 @@ export function PaginaPerfil() {
           </div>
           <div className="acciones" style={{ marginTop: '1rem' }}>
             <button type="submit" className="boton" disabled={enviando}>
-              {enviando ? 'Guardando...' : 'Actualizar contrasena'}
+              {enviando ? 'Guardando...' : 'Actualizar contraseña'}
             </button>
           </div>
         </form>
