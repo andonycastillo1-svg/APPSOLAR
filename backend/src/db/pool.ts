@@ -4,6 +4,39 @@ import { logger } from '../config/logger';
 
 let pool: Pool | null = null;
 
+/** Columnas definidas como JSON en las migraciones. */
+const COLUMNAS_JSON = new Set([
+  'datos_antes',
+  'datos_despues',
+  'decisiones',
+  'resumen',
+  'detalle',
+  'parametros',
+]);
+
+/**
+ * En MySQL el driver entrega las columnas JSON ya convertidas en objetos; en
+ * MariaDB el tipo JSON es un alias de texto y llegan como cadena. Se unifica el
+ * comportamiento para que la API responda lo mismo con cualquiera de los dos.
+ */
+export function convertirTipo(
+  field: { name: string; type: string; string: () => string | null },
+  siguiente: () => unknown,
+): unknown {
+  if (COLUMNAS_JSON.has(field.name) && field.type !== 'JSON') {
+    const texto = field.string();
+    if (texto && /^\s*[\[{]/.test(texto)) {
+      try {
+        return JSON.parse(texto);
+      } catch {
+        return texto;
+      }
+    }
+    return texto;
+  }
+  return siguiente();
+}
+
 /**
  * Pool de conexiones MySQL.
  *
@@ -34,6 +67,7 @@ export function getPool(): Pool {
       timezone: 'Z',
       supportBigNumbers: true,
       namedPlaceholders: false,
+      typeCast: convertirTipo as never,
     });
   }
   return pool;
