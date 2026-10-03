@@ -2,11 +2,31 @@ import { env } from './config/env';
 import { logger } from './config/logger';
 import { crearApp } from './app';
 import { closePool, ping } from './db/pool';
+import { runMigrations } from './db/migrator';
+import { asegurarIntegracionHuawei, bootstrapAdministrador } from './db/seed';
 import { iniciarTareasProgramadas, detenerTareasProgramadas } from './jobs/programador';
 
 process.env.TZ = env.timezone;
 
 async function iniciar(): Promise<void> {
+  if (env.autoMigrate) {
+    try {
+      const resultado = await runMigrations();
+      logger.info(
+        `Migraciones automaticas: ${resultado.aplicadas.length} aplicada(s), ${resultado.omitidas.length} al dia.`,
+      );
+      await bootstrapAdministrador();
+      await asegurarIntegracionHuawei();
+    } catch (error) {
+      const motivo = error instanceof Error ? error.message : String(error);
+      logger.error(
+        { err: error },
+        `Fallo la preparacion automatica de la base de datos (${env.db.user}@${env.db.host}/${env.db.database}): ${motivo}`,
+      );
+      process.exit(1);
+    }
+  }
+
   const disponible = await ping();
   if (!disponible) {
     logger.error(
@@ -27,7 +47,7 @@ async function iniciar(): Promise<void> {
   iniciarTareasProgramadas();
 
   const apagar = async (senal: string) => {
-    logger.info(`Senal ${senal} recibida: cerrando el servicio de forma ordenada.`);
+    logger.info(`Señal ${senal} recibida: cerrando el servicio de forma ordenada.`);
     detenerTareasProgramadas();
     servidor.close(async () => {
       await closePool();
