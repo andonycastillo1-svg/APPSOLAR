@@ -83,7 +83,7 @@ export function PaginaResumenAnual() {
 
       <section className="tarjeta no-imprimir">
         <div className="filtros">
-          <CampoSelect etiqueta="Anio" value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
+          <CampoSelect etiqueta="Año" value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
             {anios.map((a) => (
               <option key={a} value={a}>{a}</option>
             ))}
@@ -147,7 +147,7 @@ export function PaginaResumenAnual() {
               <p className="indicador__etiqueta">Total generado {anio}</p>
               <p className="indicador__valor">{kwh(datos.totales.generacion_anio_seleccionado)}</p>
               <p className="indicador__detalle">
-                Anio {anio - 1}: {kwh(datos.totales.generacion_anio_anterior)}
+                Año {anio - 1}: {kwh(datos.totales.generacion_anio_anterior)}
               </p>
             </div>
             <div className="indicador">
@@ -169,7 +169,7 @@ export function PaginaResumenAnual() {
               <p className="indicador__etiqueta">Cumplimiento {anio}</p>
               <p className="indicador__valor">{porcentaje(datos.totales.cumplimiento_anio_seleccionado)}</p>
               <p className="indicador__detalle">
-                Anio {anio - 1}: {porcentaje(datos.totales.cumplimiento_anio_anterior)}
+                Año {anio - 1}: {porcentaje(datos.totales.cumplimiento_anio_anterior)}
               </p>
             </div>
             <div className={mesesPendientes > 0 ? 'indicador indicador--ambar' : 'indicador indicador--verde'}>
