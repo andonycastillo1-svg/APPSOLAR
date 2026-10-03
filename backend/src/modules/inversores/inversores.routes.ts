@@ -19,6 +19,14 @@ import { PERMISOS } from '../../config/permisos';
 import { auditarDesdeRequest } from '../../services/auditoria';
 
 export const inversoresRouter = Router();
+
+/** Integracion Huawei registrada (el sistema maneja una sola). */
+async function integracionHuawei(): Promise<number | null> {
+  const fila = await queryOne<{ id_api: number }>(
+    "SELECT id_api FROM apis_fabricante WHERE marca = 'HUAWEI' ORDER BY id_api LIMIT 1",
+  );
+  return fila?.id_api ?? null;
+}
 inversoresRouter.use(requiereAutenticacion);
 
 const CONEXIONES = ['MANUAL', 'HUAWEI_API'] as const;
@@ -228,6 +236,9 @@ inversoresRouter.post(
       }
     }
 
+    const idApi =
+      datos.id_api ?? (datos.tipo_conexion === 'HUAWEI_API' ? await integracionHuawei() : null);
+
     const resultado = await execute(
       `INSERT INTO inversores
          (id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo, estacion_externa,
@@ -243,7 +254,7 @@ inversoresRouter.post(
         datos.estacion_externa || null,
         datos.capacidad_kwp ?? null,
         datos.estado,
-        datos.id_api ?? null,
+        idApi,
         datos.observaciones || null,
         datos.activo ? 1 : 0,
         req.usuario!.id_usuario,
@@ -267,11 +278,19 @@ inversoresRouter.put(
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const datos = req.body as Partial<z.infer<typeof esquemaInversor>>;
-    const actual = await queryOne<{ id_proyecto: number }>(
-      'SELECT * FROM inversores WHERE id_inversor = ?',
-      [id],
-    );
+    const actual = await queryOne<{
+      id_proyecto: number;
+      tipo_conexion: string;
+      id_api: number | null;
+    }>('SELECT * FROM inversores WHERE id_inversor = ?', [id]);
     if (!actual) throw errores.noEncontrado('el inversor solicitado');
+
+    // Un inversor Huawei queda asociado a la integracion sin pedirselo al usuario.
+    const tipoFinal = datos.tipo_conexion ?? actual.tipo_conexion;
+    const apiFinal = datos.id_api !== undefined ? datos.id_api : actual.id_api;
+    if (tipoFinal === 'HUAWEI_API' && !apiFinal) {
+      datos.id_api = await integracionHuawei();
+    }
 
     if (datos.serial_externo) {
       const duplicado = await queryOne(
