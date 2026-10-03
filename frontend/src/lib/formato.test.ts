@@ -13,7 +13,7 @@ import {
 } from './formato';
 
 /**
- * Formato de presentacion en espanol de Guatemala.
+ * Formato de presentacion en español de Guatemala.
  * Estas reglas son visibles para el usuario en toda la aplicacion.
  */
 describe('Formato de presentacion', () => {
@@ -57,7 +57,7 @@ describe('Formato de presentacion', () => {
     expect(fecha(null)).toBe('—');
   });
 
-  it('nombra los meses en espanol', () => {
+  it('nombra los meses en español', () => {
     expect(nombreMes(1)).toBe('Enero');
     expect(nombreMes(12)).toBe('Diciembre');
   });
