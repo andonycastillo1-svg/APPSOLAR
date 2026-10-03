@@ -1,5 +1,5 @@
 /**
- * Errores de aplicacion con mensajes en espanol y codigo estable para el
+ * Errores de aplicacion con mensajes en español y codigo estable para el
  * frontend. El manejador centralizado los traduce a respuestas HTTP.
  */
 export class AppError extends Error {
