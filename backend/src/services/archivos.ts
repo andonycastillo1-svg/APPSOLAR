@@ -10,7 +10,7 @@ import { errores } from '../utils/errors';
  *
  * Principios:
  *  - Nunca se confia en el nombre ni en el MIME declarado por el navegador.
- *  - Se valida extension, tamano y firma binaria real del contenido.
+ *  - Se valida extension, tamaño y firma binaria real del contenido.
  *  - El archivo se guarda con un nombre generado por el servidor (sin ruta ni
  *    caracteres del nombre original), fuera del arbol servido publicamente.
  */
