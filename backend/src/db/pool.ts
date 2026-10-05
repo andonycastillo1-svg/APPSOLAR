@@ -68,6 +68,14 @@ export function getPool(): Pool {
       supportBigNumbers: true,
       namedPlaceholders: false,
       typeCast: convertirTipo as never,
+      // Los hostings compartidos cierran las conexiones inactivas (en Hostinger,
+      // wait_timeout = 20 s). El pool las descarta ANTES de que el servidor las corte,
+      // para que ninguna consulta caiga sobre una conexion ya muerta.
+      connectTimeout: 10_000,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 5_000,
+      maxIdle: Math.min(3, env.db.connectionLimit),
+      idleTimeout: env.db.idleTimeoutMs,
     });
   }
   return pool;
@@ -82,13 +90,34 @@ export async function closePool(): Promise<void> {
 
 export type Executor = Pool | PoolConnection;
 
+const ERRORES_CONEXION_PERDIDA = new Set([
+  'PROTOCOL_CONNECTION_LOST',
+  'ECONNRESET',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ER_SERVER_SHUTDOWN',
+]);
+
 export async function query<T = RowDataPacket>(
   sql: string,
   params: unknown[] = [],
   executor: Executor = getPool(),
 ): Promise<T[]> {
-  const [rows] = await executor.query(sql, params);
-  return rows as T[];
+  try {
+    const [rows] = await executor.query(sql, params);
+    return rows as T[];
+  } catch (error) {
+    // Una lectura que cae sobre una conexion que el servidor ya cerro se repite una vez
+    // con una conexion nueva. Las escrituras no se repiten: podrian duplicarse.
+    const codigo = (error as { code?: string }).code ?? '';
+    const esLectura = /^\s*(SELECT|SHOW)/i.test(sql);
+    if (esLectura && ERRORES_CONEXION_PERDIDA.has(codigo) && executor === pool) {
+      logger.warn({ codigo }, 'Conexion a la base perdida; se repite la lectura una vez.');
+      const [rows] = await executor.query(sql, params);
+      return rows as T[];
+    }
+    throw error;
+  }
 }
 
 export async function queryOne<T = RowDataPacket>(
