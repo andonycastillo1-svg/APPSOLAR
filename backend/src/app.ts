@@ -126,6 +126,12 @@ export function crearApp() {
     }),
   );
 
+  // El CDN del hosting no debe guardar respuestas de la API: datos y sesiones son por usuario.
+  app.use(env.apiPrefix, (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
+
   app.use(protegerCsrf);
 
   // --- Rutas ------------------------------------------------------------
