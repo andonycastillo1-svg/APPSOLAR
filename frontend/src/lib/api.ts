@@ -108,6 +108,39 @@ export function construirUrl(
   return url.toString();
 }
 
+/** Tiempo maximo de espera: las lecturas deben ser rapidas; las operaciones largas (sincronizar, importar) no. */
+const TIEMPO_LECTURA_MS = 30_000;
+const TIEMPO_OPERACION_MS = 180_000;
+
+/**
+ * Ejecuta fetch con tiempo limite. Un servidor atascado ya no deja la pantalla en
+ * "Cargando" para siempre: se convierte en un error 503 que React Query reintenta.
+ */
+async function fetchConLimite(
+  url: string,
+  init: RequestInit,
+  limiteMs: number,
+  externa?: AbortSignal,
+): Promise<Response> {
+  const control = new AbortController();
+  const temporizador = setTimeout(() => control.abort(), limiteMs);
+  externa?.addEventListener('abort', () => control.abort());
+  try {
+    return await fetch(url, { ...init, signal: control.signal });
+  } catch (error) {
+    if (externa?.aborted) throw error;
+    const agotado = (error as Error).name === 'AbortError';
+    throw new ErrorApi(503, {
+      codigo: agotado ? 'TIEMPO_AGOTADO' : 'SIN_CONEXION',
+      mensaje: agotado
+        ? 'El servidor tardo demasiado en responder. Intente de nuevo en unos segundos.'
+        : 'No fue posible comunicarse con el servidor. Revise su conexion e intente de nuevo.',
+    });
+  } finally {
+    clearTimeout(temporizador);
+  }
+}
+
 export async function peticion<T>(
   ruta: string,
   opciones: OpcionesPeticion = {},
@@ -118,13 +151,17 @@ export async function peticion<T>(
   if (metodo !== 'GET') cabeceras['x-csrf-token'] = tokenCsrf();
   if (opciones.cuerpo !== undefined) cabeceras['content-type'] = 'application/json';
 
-  const respuesta = await fetch(construirUrl(ruta, opciones.parametros), {
-    method: metodo,
-    credentials: 'include',
-    headers: cabeceras,
-    body: opciones.formData ?? (opciones.cuerpo !== undefined ? JSON.stringify(opciones.cuerpo) : undefined),
-    signal: opciones.senal,
-  });
+  const respuesta = await fetchConLimite(
+    construirUrl(ruta, opciones.parametros),
+    {
+      method: metodo,
+      credentials: 'include',
+      headers: cabeceras,
+      body: opciones.formData ?? (opciones.cuerpo !== undefined ? JSON.stringify(opciones.cuerpo) : undefined),
+    },
+    metodo === 'GET' ? TIEMPO_LECTURA_MS : TIEMPO_OPERACION_MS,
+    opciones.senal,
+  );
 
   if (respuesta.status === 401 && !opciones.sinReintento && !ruta.startsWith('/auth/')) {
     const renovado = await renovarSesion();
@@ -138,6 +175,13 @@ export async function peticion<T>(
   try {
     cuerpo = texto ? JSON.parse(texto) : {};
   } catch {
+    if ([502, 503, 504].includes(respuesta.status)) {
+      throw new ErrorApi(respuesta.status, {
+        codigo: 'SERVIDOR_NO_DISPONIBLE',
+        mensaje:
+          'El servidor no esta disponible en este momento (puede estar reiniciandose o con mucha carga). Intente de nuevo en unos segundos.',
+      });
+    }
     throw new ErrorApi(respuesta.status, {
       codigo: 'RESPUESTA_INVALIDA',
       mensaje: 'El servidor devolvio una respuesta que no se pudo interpretar.',
