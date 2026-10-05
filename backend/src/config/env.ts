@@ -93,6 +93,8 @@ export const env = {
       ? str('DB_NAME_TEST', `${str('DB_NAME', 'appsolar')}_test`)
       : str('DB_NAME', 'appsolar'),
     connectionLimit: num('DB_CONNECTION_LIMIT', 10),
+    // Debe ser MENOR que el wait_timeout del servidor MySQL/MariaDB (en Hostinger son 20 s).
+    idleTimeoutMs: num('DB_IDLE_TIMEOUT_MS', 10000),
   },
 
   auth: {
