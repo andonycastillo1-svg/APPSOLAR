@@ -74,8 +74,11 @@ require('./dist/server.js');
 `,
 );
 
-fs.copyFileSync(path.join(__dirname, 'env.hosting.ejemplo'), path.join(destino, 'env.hosting.ejemplo'));
-fs.copyFileSync(path.join(__dirname, 'LEEME_INSTALACION.md'), path.join(destino, 'LEEME_INSTALACION.md'));
+// Archivos de ayuda opcionales: si no existen, el paquete se genera igual.
+for (const ayuda of ['env.hosting.ejemplo', 'LEEME_INSTALACION.md']) {
+  const origen = path.join(__dirname, ayuda);
+  if (fs.existsSync(origen)) fs.copyFileSync(origen, path.join(destino, ayuda));
+}
 
 console.log('6/6 Comprimiendo el paquete...');
 ejecutar('python', [path.join(__dirname, 'comprimir.py'), destino, zip]);
