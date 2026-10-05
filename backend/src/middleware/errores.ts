@@ -111,13 +111,23 @@ export function manejadorErrores(
     return;
   }
 
-  logger.error({ err, correlationId: req.correlationId, ruta: req.originalUrl }, 'Error no controlado');
+  // El motivo va en el texto del registro (no se muestra al usuario) para poder
+  // diagnosticar desde el panel del hosting, que solo exhibe el mensaje.
+  const motivoInterno = err instanceof Error ? err.message : String(err);
+  logger.error(
+    { err, correlationId: req.correlationId, ruta: req.originalUrl },
+    `Error no controlado [${req.correlationId}] ${req.method} ${req.originalUrl}: ${motivoInterno}`,
+  );
+
+  // Solo quien administra la configuracion ve el motivo tecnico; el resto, el mensaje generico.
+  const esAdministrador = Boolean(req.usuario?.permisos.includes('config.gestionar'));
+  const sufijoTecnico = esAdministrador ? ` Detalle tecnico: ${motivoInterno.slice(0, 300)}` : '';
 
   res.status(500).json({
     ok: false,
     error: {
       codigo: 'ERROR_INTERNO',
-      mensaje: 'Ocurrio un error inesperado. Si persiste, informe al administrador.',
+      mensaje: `Ocurrio un error inesperado. Si persiste, informe al administrador.${sufijoTecnico}`,
       detalles: env.isProduction ? undefined : { mensajeTecnico: String(err) },
       correlationId: req.correlationId,
     },
