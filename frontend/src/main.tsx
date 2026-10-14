@@ -5,6 +5,11 @@ import { App } from './App';
 import { ProveedorSesion } from './lib/auth';
 import { ErrorApi } from './lib/api';
 import './styles/global.css';
+import './styles/rediseno.css';
+import { iniciarTema } from './lib/tema';
+
+// El tema se fija antes del primer pintado para evitar el parpadeo claro/oscuro.
+iniciarTema();
 
 const clienteConsultas = new QueryClient({
   defaultOptions: {

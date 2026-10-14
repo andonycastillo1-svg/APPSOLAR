@@ -1,11 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useCatalogos, useGrupos } from '../hooks/useCatalogos';
 import { CampoSelect, CampoTexto } from '../components/Campos';
 import { Cargando, MensajeAlerta, MensajeError, MensajeInfo } from '../components/Estados';
-import { GraficaDistribucion, GraficaSerie, GraficaBarrasComparacion } from '../components/Graficas';
+import {
+  GraficaBarrasComparacion,
+  GraficaDistribucion,
+  GraficaMapaArbol,
+  GraficaMedidor,
+  GraficaSerie,
+  SelectorTipo,
+  Sparkline,
+} from '../components/Graficas';
+import { Contador } from '../components/Contador';
+import { Icono, type NombreIcono } from '../components/Iconos';
 import { Tabla } from '../components/Tabla';
 import {
   claseEstado,
@@ -167,6 +177,47 @@ interface RespuestaTablero {
   meta: { moneda: string; unidadEnergia: string; zonaHoraria: string; generadoEn: string };
 }
 
+/** Tarjeta de indicador con icono animado, valor y tendencia opcional. */
+function Kpi({
+  icono,
+  tono,
+  etiqueta,
+  valor,
+  detalle,
+  tendencia,
+  spark,
+}: {
+  icono: NombreIcono;
+  tono?: 'verde' | 'ambar' | 'rojo';
+  etiqueta: string;
+  valor: ReactNode;
+  detalle?: ReactNode;
+  /** Variacion porcentual contra el periodo anterior. */
+  tendencia?: number | null;
+  spark?: number[];
+}) {
+  return (
+    <div className={tono ? `indicador indicador--${tono}` : 'indicador'}>
+      <div className="indicador__cabecera">
+        <p className="indicador__etiqueta" style={{ margin: 0 }}>{etiqueta}</p>
+        <span className="indicador__icono">
+          <Icono nombre={icono} />
+        </span>
+      </div>
+      <p className="indicador__valor">{valor}</p>
+      <p className="indicador__detalle">
+        {tendencia !== undefined && tendencia !== null ? (
+          <span className={`tendencia ${tendencia >= 0 ? 'tendencia--sube' : 'tendencia--baja'}`}>
+            {tendencia >= 0 ? '▲' : '▼'} {numero(Math.abs(tendencia), 1)}%
+          </span>
+        ) : null}{' '}
+        {detalle}
+      </p>
+      {spark && spark.length > 1 ? <Sparkline valores={spark} etiqueta={etiqueta} /> : null}
+    </div>
+  );
+}
+
 export function PaginaTablero() {
   const catalogos = useCatalogos();
   const [filtros, setFiltros] = useState({
@@ -218,7 +269,29 @@ export function PaginaTablero() {
     });
   };
 
+  const [rankingModo, setRankingModo] = useState<'kwh' | 'rendimiento'>('kwh');
+
   const datos = consulta.data;
+
+  const ranking = useMemo(() => {
+    if (!datos) return [];
+    const base = datos.inversores
+      .map((i) => ({
+        nombre: i.inversor,
+        valor:
+          rankingModo === 'kwh'
+            ? i.kwh
+            : i.capacidad_kwp && i.capacidad_kwp > 0
+              ? i.kwh / i.capacidad_kwp
+              : null,
+      }))
+      .filter((i): i is { nombre: string; valor: number } => i.valor !== null && i.valor > 0)
+      .sort((a, b) => b.valor - a.valor);
+    return base.slice(0, 10);
+  }, [datos, rankingModo]);
+
+  const tendenciaSerie = useMemo(() => datos?.serie.map((s) => s.kwh) ?? [], [datos]);
+  const tendenciaValor = useMemo(() => datos?.serie.map((s) => s.valor_q) ?? [], [datos]);
 
   return (
     <>
@@ -230,7 +303,7 @@ export function PaginaTablero() {
           </p>
         </div>
         <button type="button" className="boton boton--secundario no-imprimir" onClick={() => window.print()}>
-          Imprimir tablero
+          <Icono nombre="imprimir" tamano={18} /> Imprimir tablero
         </button>
       </div>
 
@@ -345,78 +418,72 @@ export function PaginaTablero() {
           ) : null}
 
           <section className="rejilla" aria-label="Indicadores principales">
-            <div className="indicador">
-              <p className="indicador__etiqueta">Produccion del periodo</p>
-              <p className="indicador__valor">{kwh(datos.produccion.periodo_kwh)}</p>
-              <p className="indicador__detalle">{datos.produccion.registros} registro(s)</p>
-            </div>
-            <div className={datos.tarifas.cobertura.completa ? 'indicador indicador--verde' : 'indicador indicador--ambar'}>
-              <p className="indicador__etiqueta">Valor economico estimado</p>
-              <p className="indicador__valor">{quetzales(datos.produccion.valor_q)}</p>
-              <p className="indicador__detalle">
-                {datos.tarifas.cobertura.completa ? 'Cobertura tarifaria completa' : 'Monto parcial: faltan tarifas'}
-              </p>
-            </div>
-            <div className="indicador">
-              <p className="indicador__etiqueta">Proyeccion del periodo</p>
-              <p className="indicador__valor">
-                {datos.proyeccion.kwh > 0 ? kwh(datos.proyeccion.kwh) : 'Sin proyeccion'}
-              </p>
-              <p className="indicador__detalle">
-                {datos.proyeccion.mesesConProyeccion} de {datos.proyeccion.mesesDelPeriodo} mes(es) con proyeccion aprobada
-              </p>
-            </div>
-            <div
-              className={
-                datos.proyeccion.cumplimiento === null
-                  ? 'indicador'
-                  : datos.proyeccion.cumplimiento >= 100
-                    ? 'indicador indicador--verde'
-                    : 'indicador indicador--ambar'
+            <Kpi
+              icono="produccion"
+              etiqueta="Produccion del periodo"
+              valor={<Contador valor={datos.produccion.periodo_kwh} formato={kwh} />}
+              tendencia={datos.variacion.porcentual_kwh}
+              detalle={`${datos.produccion.registros} registro(s)`}
+              spark={tendenciaSerie}
+            />
+            <Kpi
+              icono="reportes"
+              tono={datos.tarifas.cobertura.completa ? 'verde' : 'ambar'}
+              etiqueta="Valor economico estimado"
+              valor={<Contador valor={datos.produccion.valor_q} formato={quetzales} />}
+              detalle={
+                datos.tarifas.cobertura.completa ? 'Cobertura tarifaria completa' : 'Monto parcial: faltan tarifas'
               }
-            >
-              <p className="indicador__etiqueta">Cumplimiento de la proyeccion</p>
-              <p className="indicador__valor">
-                {datos.proyeccion.cumplimiento === null ? 'Sin proyeccion' : porcentaje(datos.proyeccion.cumplimiento)}
-              </p>
-              <p className="indicador__detalle">generacion real / proyeccion x 100</p>
-            </div>
-            <div
-              className={
+              spark={tendenciaValor}
+            />
+            <Kpi
+              icono="resumen"
+              etiqueta="Proyeccion del periodo"
+              valor={
+                datos.proyeccion.kwh > 0 ? (
+                  <Contador valor={datos.proyeccion.kwh} formato={kwh} />
+                ) : (
+                  'Sin proyeccion'
+                )
+              }
+              detalle={`${datos.proyeccion.mesesConProyeccion} de ${datos.proyeccion.mesesDelPeriodo} mes(es) con proyeccion aprobada`}
+            />
+            <Kpi
+              icono="tablero"
+              tono={
                 datos.variacion.porcentual_kwh === null
-                  ? 'indicador'
+                  ? undefined
                   : datos.variacion.porcentual_kwh >= 0
-                    ? 'indicador indicador--verde'
-                    : 'indicador indicador--rojo'
+                    ? 'verde'
+                    : 'rojo'
               }
-            >
-              <p className="indicador__etiqueta">Variacion vs. periodo anterior</p>
-              <p className="indicador__valor">{porcentaje(datos.variacion.porcentual_kwh)}</p>
-              <p className="indicador__detalle">
-                {numero(datos.variacion.absoluta_kwh)} kWh · {datos.variacion.base}
-              </p>
-            </div>
-            <div className="indicador">
-              <p className="indicador__etiqueta">Produccion hoy / mes / año</p>
-              <p className="indicador__valor">{kwh(datos.produccion.dia_kwh)}</p>
-              <p className="indicador__detalle">
-                Mes: {kwh(datos.produccion.mes_kwh)} · Año: {kwh(datos.produccion.anio_kwh)}
-              </p>
-            </div>
-            <div className="indicador">
-              <p className="indicador__etiqueta">Catalogos activos</p>
-              <p className="indicador__valor">{datos.catalogos.proyectos} proyectos</p>
-              <p className="indicador__detalle">
-                {datos.catalogos.clientes} cliente(s) · {datos.catalogos.inversores} inversor(es)
-              </p>
-            </div>
-            <div className="indicador indicador--verde">
-              <p className="indicador__etiqueta">Equivalencia ambiental</p>
-              <p className="indicador__valor">{numero(datos.ambiental.toneladas_co2_evitadas)} tCO2e</p>
-              <p className="indicador__detalle">
-                ≈ {numero(datos.ambiental.arboles_equivalentes, 0)} arbol(es) equivalentes
-              </p>
-            </div>
+              etiqueta="Variacion vs. periodo anterior"
+              valor={porcentaje(datos.variacion.porcentual_kwh)}
+              detalle={`${numero(datos.variacion.absoluta_kwh)} kWh · ${datos.variacion.base}`}
+            />
+            <Kpi
+              icono="proyectos"
+              etiqueta="Produccion hoy / mes / año"
+              valor={<Contador valor={datos.produccion.dia_kwh} formato={kwh} />}
+              detalle={`Mes: ${kwh(datos.produccion.mes_kwh)} · Año: ${kwh(datos.produccion.anio_kwh)}`}
+            />
+            <Kpi
+              icono="inversores"
+              etiqueta="Catalogos activos"
+              valor={`${datos.catalogos.proyectos} proyectos`}
+              detalle={`${datos.catalogos.clientes} cliente(s) · ${datos.catalogos.inversores} inversor(es)`}
+            />
+            <Kpi
+              icono="ok"
+              tono="verde"
+              etiqueta="Equivalencia ambiental"
+              valor={
+                <>
+                  <Contador valor={datos.ambiental.toneladas_co2_evitadas} formato={(n) => numero(n)} /> tCO2e
+                </>
+              }
+              detalle={`≈ ${numero(datos.ambiental.arboles_equivalentes, 0)} arbol(es) equivalentes`}
+            />
           </section>
 
           <details className="tarjeta">
@@ -446,17 +513,49 @@ export function PaginaTablero() {
             <GraficaSerie datos={datos.serie} titulo="Produccion por periodo" />
           </section>
 
-          <div style={{ display: 'grid', gap: '1.1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))' }}>
+          <div style={{ display: 'grid', gap: '1.1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>
+            <section className="tarjeta">
+              <h2>Cumplimiento de la proyeccion</h2>
+              <GraficaMedidor
+                valor={datos.proyeccion.cumplimiento}
+                etiqueta="de la proyeccion"
+                detalle={
+                  datos.proyeccion.kwh > 0
+                    ? `${kwh(datos.produccion.periodo_kwh)} generados de ${kwh(datos.proyeccion.kwh)} proyectados`
+                    : undefined
+                }
+              />
+            </section>
+
             <section className="tarjeta">
               <h2>Distribucion por proyecto</h2>
               <GraficaDistribucion datos={datos.distribucionPorProyecto} />
             </section>
+          </div>
+
+          <div style={{ display: 'grid', gap: '1.1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>
+            <section className="tarjeta">
+              <div className="tarjeta__titulo">
+                <h2>Ranking de inversores</h2>
+                <SelectorTipo<'kwh' | 'rendimiento'>
+                  etiqueta="Criterio del ranking"
+                  valor={rankingModo}
+                  alCambiar={setRankingModo}
+                  opciones={[
+                    { valor: 'kwh', texto: 'Generacion (kWh)' },
+                    { valor: 'rendimiento', texto: 'Rendimiento (kWh/kWp)' },
+                  ]}
+                />
+              </div>
+              <GraficaBarrasComparacion
+                datos={ranking}
+                etiquetaValor={rankingModo === 'kwh' ? 'kWh' : 'kWh por kWp'}
+              />
+            </section>
 
             <section className="tarjeta">
-              <h2>Comparacion entre inversores</h2>
-              <GraficaBarrasComparacion
-                datos={datos.inversores.slice(0, 10).map((i) => ({ nombre: i.inversor, valor: i.kwh }))}
-              />
+              <h2>Peso de cada grupo de inversores</h2>
+              <GraficaMapaArbol datos={datos.grupos.map((g) => ({ nombre: `${g.proyecto} · ${g.grupo}`, valor: g.kwh }))} />
             </section>
           </div>
 

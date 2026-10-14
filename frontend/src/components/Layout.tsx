@@ -3,11 +3,13 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api, ErrorApi } from '../lib/api';
 import { NOMBRE_ROL, useSesion } from '../lib/auth';
 import { MensajeAlerta } from './Estados';
+import { Icono, type NombreIcono } from './Iconos';
+import { cambiarTema, useTema } from '../lib/tema';
 
 interface Enlace {
   a: string;
   texto: string;
-  icono: string;
+  icono: NombreIcono;
   permisos?: string[];
 }
 
@@ -20,34 +22,34 @@ const NAVEGACION: Grupo[] = [
   {
     titulo: 'Analisis',
     enlaces: [
-      { a: '/', texto: 'Tablero', icono: '◧', permisos: ['dashboard.ver'] },
-      { a: '/resumen-anual', texto: 'Resumen anual', icono: '▦', permisos: ['produccion.ver'] },
-      { a: '/reportes', texto: 'Reportes', icono: '▤', permisos: ['reportes.ver'] },
+      { a: '/', texto: 'Tablero', icono: 'tablero', permisos: ['dashboard.ver'] },
+      { a: '/resumen-anual', texto: 'Resumen anual', icono: 'resumen', permisos: ['produccion.ver'] },
+      { a: '/reportes', texto: 'Reportes', icono: 'reportes', permisos: ['reportes.ver'] },
     ],
   },
   {
     titulo: 'Operacion',
     enlaces: [
-      { a: '/produccion', texto: 'Produccion', icono: '⚡', permisos: ['produccion.ver'] },
-      { a: '/importaciones', texto: 'Carga de historicos', icono: '⇧', permisos: ['importaciones.ver'] },
-      { a: '/integracion', texto: 'Integracion Huawei', icono: '⟳', permisos: ['huawei.ver'] },
+      { a: '/produccion', texto: 'Produccion', icono: 'produccion', permisos: ['produccion.ver'] },
+      { a: '/importaciones', texto: 'Carga de historicos', icono: 'importar', permisos: ['importaciones.ver'] },
+      { a: '/integracion', texto: 'Integracion Huawei', icono: 'sincronizar', permisos: ['huawei.ver'] },
     ],
   },
   {
     titulo: 'Catalogos',
     enlaces: [
-      { a: '/clientes', texto: 'Clientes', icono: '◆', permisos: ['clientes.ver'] },
-      { a: '/proyectos', texto: 'Proyectos solares', icono: '☀', permisos: ['proyectos.ver'] },
-      { a: '/inversores', texto: 'Inversores', icono: '▣', permisos: ['inversores.ver'] },
+      { a: '/clientes', texto: 'Clientes', icono: 'clientes', permisos: ['clientes.ver'] },
+      { a: '/proyectos', texto: 'Proyectos solares', icono: 'proyectos', permisos: ['proyectos.ver'] },
+      { a: '/inversores', texto: 'Inversores', icono: 'inversores', permisos: ['inversores.ver'] },
     ],
   },
   {
     titulo: 'Administracion',
     enlaces: [
-      { a: '/usuarios', texto: 'Usuarios y permisos', icono: '☖', permisos: ['usuarios.ver'] },
-      { a: '/auditoria', texto: 'Auditoria', icono: '☰', permisos: ['auditoria.ver'] },
-      { a: '/configuracion', texto: 'Configuracion', icono: '⚙', permisos: ['config.ver'] },
-      { a: '/estado', texto: 'Estado de servicios', icono: '♥', permisos: ['salud.ver'] },
+      { a: '/usuarios', texto: 'Usuarios y permisos', icono: 'usuarios', permisos: ['usuarios.ver'] },
+      { a: '/auditoria', texto: 'Auditoria', icono: 'auditoria', permisos: ['auditoria.ver'] },
+      { a: '/configuracion', texto: 'Configuracion', icono: 'configuracion', permisos: ['config.ver'] },
+      { a: '/estado', texto: 'Estado de servicios', icono: 'estado', permisos: ['salud.ver'] },
     ],
   },
 ];
@@ -105,7 +107,7 @@ function BotonSincronizarAhora({ alTerminar }: { alTerminar: () => void }) {
         disabled={estado === 'sincronizando'}
         aria-busy={estado === 'sincronizando'}
       >
-        <span aria-hidden="true">⟳</span>{' '}
+        <Icono nombre="sincronizar" activo={estado === 'sincronizando'} />
         {estado === 'sincronizando' ? 'Sincronizando…' : 'Sincronizar ahora'}
       </button>
       <p className="lateral__sync-ayuda">Trae toda la producción de Huawei hasta este momento.</p>
@@ -137,10 +139,23 @@ export function Layout() {
   const [versionDatos, setVersionDatos] = useState(0);
   const navegar = useNavigate();
   const ubicacion = useLocation();
+  const tema = useTema();
 
   useEffect(() => {
     setMenuAbierto(false);
   }, [ubicacion.pathname]);
+
+  const iniciales = (usuario?.nombre ?? '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((palabra) => palabra[0]?.toUpperCase() ?? '')
+    .join('');
+
+  // Seccion y pantalla actuales, para la miga de pan del encabezado.
+  const rutaActual = NAVEGACION.flatMap((g) => g.enlaces.map((e) => ({ ...e, grupo: g.titulo }))).find((e) =>
+    e.a === '/' ? ubicacion.pathname === '/' : ubicacion.pathname.startsWith(e.a),
+  );
 
   const grupos = NAVEGACION.map((grupo) => ({
     ...grupo,
@@ -155,8 +170,13 @@ export function Layout() {
 
       <aside className="lateral" data-abierto={menuAbierto} id="menu-lateral">
         <div className="lateral__marca">
-          <span>Retse, S.A.</span>
-          <strong>Monitoreo Energetico</strong>
+          <span className="lateral__logo" aria-hidden="true">
+            <Icono nombre="proyectos" tamano={24} />
+          </span>
+          <div className="lateral__titulos">
+            <span>Retse, S.A.</span>
+            <strong>Monitoreo Energetico</strong>
+          </div>
         </div>
         <nav aria-label="Navegacion principal">
           {grupos.map((grupo) => (
@@ -164,7 +184,7 @@ export function Layout() {
               <p className="lateral__grupo">{grupo.titulo}</p>
               {grupo.enlaces.map((enlace) => (
                 <NavLink key={enlace.a} to={enlace.a} end={enlace.a === '/'}>
-                  <span aria-hidden="true">{enlace.icono}</span>
+                  <Icono nombre={enlace.icono} />
                   {enlace.texto}
                 </NavLink>
               ))}
@@ -175,6 +195,7 @@ export function Layout() {
           <BotonSincronizarAhora alTerminar={() => setVersionDatos((v) => v + 1)} />
         ) : null}
       </aside>
+      <div className="velo-menu" onClick={() => setMenuAbierto(false)} aria-hidden="true" />
 
       <header className="encabezado">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
@@ -185,12 +206,27 @@ export function Layout() {
             aria-controls="menu-lateral"
             onClick={() => setMenuAbierto((valor) => !valor)}
           >
-            <span aria-hidden="true">☰</span> Menu
+            <Icono nombre="menu" tamano={18} /> Menu
           </button>
-          <strong style={{ fontSize: '0.95rem' }}>Sistema Centralizado de Monitoreo Energetico</strong>
+          <div>
+            <span className="encabezado__migas">{rutaActual?.grupo ?? 'Sistema'}</span>
+            <strong className="encabezado__titulo">
+              {rutaActual?.texto ?? 'Sistema Centralizado de Monitoreo Energetico'}
+            </strong>
+          </div>
         </div>
 
         <div className="encabezado__usuario">
+          <button
+            type="button"
+            className="boton-icono"
+            onClick={() => cambiarTema()}
+            aria-label={tema === 'oscuro' ? 'Cambiar al tema claro' : 'Cambiar al tema oscuro'}
+            title={tema === 'oscuro' ? 'Tema claro' : 'Tema oscuro'}
+          >
+            <Icono nombre={tema === 'oscuro' ? 'sol' : 'luna'} />
+          </button>
+          <span className="avatar" aria-hidden="true">{iniciales}</span>
           <div style={{ textAlign: 'right' }}>
             <div className="nombre">{usuario?.nombre}</div>
             <span className="rol">{usuario ? NOMBRE_ROL[usuario.rol] : ''}</span>
@@ -200,7 +236,7 @@ export function Layout() {
             className="boton boton--secundario boton--pequeno"
             onClick={() => navegar('/perfil')}
           >
-            Mi perfil
+            <Icono nombre="perfil" tamano={16} /> Mi perfil
           </button>
           <button
             type="button"
@@ -209,7 +245,7 @@ export function Layout() {
               void cerrarSesion().then(() => navegar('/ingresar'));
             }}
           >
-            Cerrar sesion
+            <Icono nombre="salir" tamano={16} /> Cerrar sesion
           </button>
         </div>
       </header>

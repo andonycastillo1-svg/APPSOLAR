@@ -10,7 +10,13 @@ import {
   MensajeExito,
   MensajeInfo,
 } from '../components/Estados';
-import { GraficaSerie } from '../components/Graficas';
+import {
+  GraficaBarrasComparacion,
+  GraficaCumplimiento,
+  GraficaDistribucion,
+  GraficaMedidor,
+  GraficaSerie,
+} from '../components/Graficas';
 import { Paginacion, Tabla } from '../components/Tabla';
 import {
   anioActual,
@@ -384,6 +390,44 @@ export function PaginaReportes() {
 
             <h3>Serie de produccion</h3>
             <GraficaSerie datos={generado.serie} titulo="Produccion del periodo" />
+
+            <div style={{ display: 'grid', gap: '1.1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', marginTop: '1.2rem' }}>
+              <section>
+                <h3>Cumplimiento anual {generado.contexto.anio}</h3>
+                <GraficaMedidor
+                  valor={
+                    generado.resumenAnual.totales.cumplimiento_anio_seleccionado === null ||
+                    generado.resumenAnual.totales.cumplimiento_anio_seleccionado === undefined
+                      ? null
+                      : Number(generado.resumenAnual.totales.cumplimiento_anio_seleccionado)
+                  }
+                  etiqueta="del año"
+                />
+              </section>
+              <section>
+                <h3>Cumplimiento mensual</h3>
+                <GraficaCumplimiento filas={generado.desgloseMensual} />
+              </section>
+            </div>
+
+            {generado.porProyecto.length > 1 || generado.porInversor.length > 1 ? (
+              <div style={{ display: 'grid', gap: '1.1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', marginTop: '1.2rem' }}>
+                {generado.porProyecto.length > 1 ? (
+                  <section>
+                    <h3>Participacion por proyecto</h3>
+                    <GraficaDistribucion datos={generado.porProyecto} />
+                  </section>
+                ) : null}
+                {generado.porInversor.length > 1 ? (
+                  <section>
+                    <h3>Ranking de inversores</h3>
+                    <GraficaBarrasComparacion
+                      datos={generado.porInversor.slice(0, 10).map((i) => ({ nombre: i.inversor, valor: i.kwh }))}
+                    />
+                  </section>
+                ) : null}
+              </div>
+            ) : null}
 
             <h3 style={{ marginTop: '1.4rem' }}>Desglose mensual integrado</h3>
             <div className="tabla-envoltura">
