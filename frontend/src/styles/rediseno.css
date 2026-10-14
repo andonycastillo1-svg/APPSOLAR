@@ -841,3 +841,27 @@ a:hover .icono--clientes, a:hover .icono--usuarios { animation: saltito 600ms ea
   box-shadow: 0 10px 28px rgba(28, 79, 144, 0.35);
   animation: modal-entra 600ms var(--transicion) both;
 }
+
+/* ------------------------------------------- Inventario de proyectos */
+
+.inventario {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: center;
+  justify-content: space-between;
+  border-left: 4px solid #22c55e;
+}
+.inventario__texto { display: flex; gap: 0.9rem; align-items: center; flex: 1 1 380px; }
+.inventario__icono {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  color: #16a34a;
+  background: color-mix(in srgb, #22c55e 15%, transparent);
+}
+.inventario:hover .icono--descargar .i-bajar { animation: bajar 900ms ease infinite; }
+.inventario__acciones { display: flex; flex-wrap: wrap; gap: 0.8rem 1rem; align-items: end; }

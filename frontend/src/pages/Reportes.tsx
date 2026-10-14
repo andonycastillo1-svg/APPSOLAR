@@ -3,7 +3,8 @@ import { abrirEnPestana, api, descargar } from '../lib/api';
 import { useSesion } from '../lib/auth';
 import { useListado } from '../hooks/useListado';
 import { useCatalogos } from '../hooks/useCatalogos';
-import { CampoSelect, CampoTexto } from '../components/Campos';
+import { CampoCasilla, CampoSelect, CampoTexto } from '../components/Campos';
+import { Icono } from '../components/Iconos';
 import {
   MensajeAlerta,
   MensajeError,
@@ -104,6 +105,8 @@ export function PaginaReportes() {
     anio: String(anioActual()),
   });
   const [inversoresSeleccionados, setInversoresSeleccionados] = useState<number[]>([]);
+  const [inventario, setInventario] = useState({ id_cliente: '', soloActivos: false });
+  const [descargandoInventario, setDescargandoInventario] = useState(false);
   const [generado, setGenerado] = useState<ReporteGenerado | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [exito, setExito] = useState<string | null>(null);
@@ -120,6 +123,21 @@ export function PaginaReportes() {
     () => (parametros.id_proyecto ? catalogos.inversores.filter((i) => String(i.id_proyecto) === parametros.id_proyecto) : catalogos.inversores),
     [catalogos.inversores, parametros.id_proyecto],
   );
+
+  const descargarInventario = async () => {
+    setDescargandoInventario(true);
+    setError(null);
+    try {
+      await descargar('/reports/inventory/export', {
+        ...(inventario.id_cliente ? { id_cliente: inventario.id_cliente } : {}),
+        solo_activos: inventario.soloActivos ? '1' : '0',
+      });
+    } catch (fallo) {
+      setError(fallo);
+    } finally {
+      setDescargandoInventario(false);
+    }
+  };
 
   const generar = async () => {
     setOcupado(true);
@@ -166,6 +184,49 @@ export function PaginaReportes() {
 
       {exito ? <MensajeExito>{exito}</MensajeExito> : null}
       {error ? <MensajeError error={error} /> : null}
+
+      {puede('reportes.exportar') ? (
+        <section className="tarjeta no-imprimir inventario">
+          <div className="inventario__texto">
+            <span className="inventario__icono">
+              <Icono nombre="descargar" tamano={26} />
+            </span>
+            <div>
+              <h2 style={{ marginBottom: '0.2rem' }}>Inventario de proyectos (stock)</h2>
+              <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--texto-suave)' }}>
+                Excel con el total de clientes, proyectos, grupos, inversores y paneles, la potencia
+                instalada, la producción acumulada y el detalle de todo lo que lleva cada proyecto.
+              </p>
+            </div>
+          </div>
+          <div className="inventario__acciones">
+            <CampoSelect
+              etiqueta="Cliente"
+              value={inventario.id_cliente}
+              onChange={(e) => setInventario({ ...inventario, id_cliente: e.target.value })}
+            >
+              <option value="">Todos los clientes</option>
+              {catalogos.clientes.map((c) => (
+                <option key={c.id_cliente} value={c.id_cliente}>{c.nombre}</option>
+              ))}
+            </CampoSelect>
+            <CampoCasilla
+              etiqueta="Solo proyectos activos"
+              checked={inventario.soloActivos}
+              onChange={(e) => setInventario({ ...inventario, soloActivos: e.target.checked })}
+            />
+            <button
+              type="button"
+              className="boton boton--verde"
+              disabled={descargandoInventario}
+              onClick={() => void descargarInventario()}
+            >
+              <Icono nombre="descargar" tamano={18} />{' '}
+              {descargandoInventario ? 'Generando…' : 'Descargar inventario en Excel'}
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="tarjeta no-imprimir">
         <h2>Parametros del reporte</h2>
