@@ -101,6 +101,15 @@ export function anioActual(): number {
   return Number(hoyISO().slice(0, 4));
 }
 
+/**
+ * Anio tarifario en curso: los trimestres de la tarifa inician en noviembre,
+ * asi que el anio tarifario 2025 va de noviembre 2025 a octubre 2026.
+ */
+export function anioTarifarioActual(): number {
+  const hoy = new Date();
+  return hoy.getMonth() + 1 >= 11 ? hoy.getFullYear() : hoy.getFullYear() - 1;
+}
+
 /** Clase de etiqueta segun el estado del dato. */
 export function claseEstado(estado: string | null | undefined): string {
   switch (String(estado ?? '').toUpperCase()) {
@@ -148,6 +157,7 @@ export function textoEstado(estado: string | null | undefined): string {
     PROYECTO_CONSOLIDADO: 'Consolidado del proyecto',
     POR_INVERSOR: 'Detalle por inversor',
     HUAWEI_API: 'Huawei SmartPVMS',
+    PACTADA: 'Valor pactado',
     MOCK: 'Simulado',
     REAL: 'Real',
   };

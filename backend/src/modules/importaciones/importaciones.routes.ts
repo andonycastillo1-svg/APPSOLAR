@@ -28,13 +28,14 @@ import {
   plantillaConErroresCsv,
   plantillaHistoricaCsv,
   plantillaNormalizadaCsv,
+  plantillaPlantaCompletaXlsx,
   plantillaXlsx,
   type FilaCanonica,
   type ProblemaFila,
 } from '../../services/etl';
 import { CacheTarifas, calcularValorizacion, exigirMesAbierto } from '../../services/valorizacion';
 import { obtenerNumero } from '../../services/configuracion';
-import { MESES_ES } from '../../utils/fechas';
+import { MESES_ES, anioActual, hoyISO } from '../../utils/fechas';
 import { redondearKwh } from '../../utils/numeros';
 
 export const importacionesRouter = Router();
@@ -49,12 +50,80 @@ importacionesRouter.get(
   requierePermiso(PERMISOS.IMPORTACIONES_VER),
   validarConsulta(
     z.object({
-      formato: z.enum(['NORMALIZADO', 'HISTORICO_EXCEL']).default('HISTORICO_EXCEL'),
+      formato: z.enum(['NORMALIZADO', 'HISTORICO_EXCEL', 'PLANTA_COMPLETA']).default('HISTORICO_EXCEL'),
       tipo: z.enum(['csv', 'xlsx', 'errores']).default('xlsx'),
+      id_proyecto: z.coerce.number().int().positive().optional(),
+      anio: z.coerce.number().int().min(2000).max(2100).optional(),
     }),
   ),
   asyncHandler(async (req, res) => {
-    const { formato, tipo } = consulta<{ formato: 'NORMALIZADO' | 'HISTORICO_EXCEL'; tipo: string }>(req);
+    const { formato, tipo, id_proyecto, anio } = consulta<{
+      formato: 'NORMALIZADO' | 'HISTORICO_EXCEL' | 'PLANTA_COMPLETA';
+      tipo: string;
+      id_proyecto?: number;
+      anio?: number;
+    }>(req);
+
+    // Plantilla ya rellenada con los grupos e inversores reales de la planta.
+    if (formato === 'PLANTA_COMPLETA') {
+      if (!id_proyecto) {
+        throw errores.validacion('Seleccione el proyecto (planta) para generar su plantilla completa.');
+      }
+      const proyecto = await queryOne<{ nombre: string }>(
+        'SELECT nombre FROM proyectos WHERE id_proyecto = ? AND activo = 1',
+        [id_proyecto],
+      );
+      if (!proyecto) throw errores.noEncontrado('el proyecto indicado');
+
+      const gruposDb = await query<{ id_grupo: number; nombre: string }>(
+        'SELECT id_grupo, nombre FROM grupos WHERE id_proyecto = ? AND activo = 1 ORDER BY nombre',
+        [id_proyecto],
+      );
+      if (gruposDb.length === 0) {
+        throw errores.reglaNegocio(
+          'El proyecto no tiene grupos activos. Cree al menos un grupo antes de generar la plantilla.',
+        );
+      }
+      const inversoresDb = await query<{
+        id_grupo: number;
+        serial_externo: string;
+        marca: string;
+        modelo: string;
+      }>(
+        `SELECT id_grupo, serial_externo, marca, modelo FROM inversores
+          WHERE id_proyecto = ? AND activo = 1 AND serial_externo IS NOT NULL
+          ORDER BY id_grupo, serial_externo`,
+        [id_proyecto],
+      );
+
+      const anioPlantilla = anio ?? anioActual();
+      const hoy = hoyISO();
+      const hastaMes = anioPlantilla === Number(hoy.slice(0, 4)) ? Number(hoy.slice(5, 7)) : 12;
+
+      const buffer = await plantillaPlantaCompletaXlsx({
+        planta: proyecto.nombre,
+        anio: anioPlantilla,
+        hastaMes,
+        grupos: gruposDb.map((g) => ({
+          nombre: g.nombre,
+          inversores: inversoresDb
+            .filter((i) => i.id_grupo === g.id_grupo)
+            .map((i) => ({ serial: i.serial_externo, equipo: `${i.marca} ${i.modelo}` })),
+        })),
+      });
+
+      const nombreSeguro = normalizarNombre(proyecto.nombre).replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="plantilla_planta_${nombreSeguro || 'proyecto'}_${anioPlantilla}.xlsx"`,
+      );
+      res.send(buffer);
+      return;
+    }
 
     if (tipo === 'errores') {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -75,7 +144,7 @@ importacionesRouter.get(
       return;
     }
 
-    const buffer = await plantillaXlsx(formato);
+    const buffer = await plantillaXlsx(formato as 'NORMALIZADO' | 'HISTORICO_EXCEL');
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -113,7 +182,41 @@ interface LotePreparado {
   idInversorFijo: number | null;
   resolucionPlantas: Record<string, number | null>;
   resolucionSeriales: Record<string, number | null>;
+  /** `planta|grupo` normalizado -> id del grupo (solo formato historico con columna Grupo). */
+  resolucionGrupos: Record<string, number | null>;
+  /** id del inversor -> id de su grupo, para no volver a consultarlo al confirmar. */
+  grupoDeInversor: Record<number, number>;
   totalFilasLeidas: number;
+}
+
+const claveGrupo = (planta: string | null, grupo: string): string =>
+  `${normalizarNombre(planta ?? '')}|${normalizarNombre(grupo)}`;
+
+/**
+ * Cuando Huawei ya entrego la produccion de un inversor en ese periodo, una
+ * carga manual del mismo equipo se SUMARIA a la sincronizada. Para no duplicar
+ * energia, esas filas se omiten (mensual: el mes; diaria: el dia exacto).
+ */
+async function huaweiYaCubre(
+  idInversor: number,
+  fila: { anio: number; mes: number; fecha: string; granularidad: 'DIARIA' | 'MENSUAL' },
+  conn?: import('mysql2/promise').PoolConnection,
+): Promise<boolean> {
+  const existente =
+    fila.granularidad === 'DIARIA'
+      ? await queryOne(
+          `SELECT 1 AS x FROM produccion WHERE id_inversor = ? AND origen = 'HUAWEI_API'
+              AND activo = 1 AND fecha = ? LIMIT 1`,
+          [idInversor, fila.fecha],
+          conn,
+        )
+      : await queryOne(
+          `SELECT 1 AS x FROM produccion WHERE id_inversor = ? AND origen = 'HUAWEI_API'
+              AND activo = 1 AND anio = ? AND mes = ? LIMIT 1`,
+          [idInversor, fila.anio, fila.mes],
+          conn,
+        );
+  return Boolean(existente);
 }
 
 // ---------------------------------------------------------------------------
@@ -206,17 +309,80 @@ importacionesRouter.post(
     const serialesNoResueltos: string[] = [];
     const seriales = [...new Set(lectura.filas.map((f) => f.serial).filter(Boolean) as string[])];
 
+    const infoInversor = new Map<number, { id_proyecto: number; id_grupo: number }>();
     if (seriales.length > 0) {
-      const inversores = await query<{ id_inversor: number; serial_externo: string; id_proyecto: number }>(
-        `SELECT id_inversor, serial_externo, id_proyecto FROM inversores
+      const inversores = await query<{
+        id_inversor: number;
+        serial_externo: string;
+        id_proyecto: number;
+        id_grupo: number;
+      }>(
+        `SELECT id_inversor, serial_externo, id_proyecto, id_grupo FROM inversores
           WHERE activo = 1 AND serial_externo IS NOT NULL`,
       );
       const indice = new Map(inversores.map((i) => [normalizarNombre(i.serial_externo), i]));
+      for (const i of inversores) infoInversor.set(i.id_inversor, { id_proyecto: i.id_proyecto, id_grupo: i.id_grupo });
       for (const serial of seriales) {
         const encontrado = indice.get(normalizarNombre(serial));
         resolucionSeriales[serial] = encontrado ? encontrado.id_inversor : null;
         if (!encontrado) serialesNoResueltos.push(serial);
       }
+    }
+
+    // --- Resolucion de grupos y coherencia planta / grupo / inversor -----
+    // Plantilla de planta completa: cada fila debe apuntar a un grupo e
+    // inversor reales de ESA planta. Las filas incoherentes se descartan con
+    // su motivo (carga parcial) en lugar de cargarse en un destino equivocado.
+    const resolucionGrupos: Record<string, number | null> = {};
+    if (lectura.formato === 'HISTORICO_EXCEL') {
+      const gruposDb = await query<{ id_grupo: number; id_proyecto: number; nombre: string; activo: number }>(
+        'SELECT id_grupo, id_proyecto, nombre, activo FROM grupos',
+      );
+      const indiceGrupos = new Map(gruposDb.map((g) => [`${g.id_proyecto}|${normalizarNombre(g.nombre)}`, g]));
+      const descartadas = new Set<number>();
+      const descartar = (fila: FilaCanonica, columna: string, valor: string | null, codigo: string, mensaje: string) => {
+        descartadas.add(fila.fila);
+        problemas.push({ fila: fila.fila, columna, valor, codigo, severidad: 'ERROR', mensaje });
+      };
+
+      for (const fila of lectura.filas) {
+        const idProyFila = resolucionPlantas[fila.planta ?? ''];
+        if (!idProyFila) continue;
+
+        let idGrupoFila: number | null = null;
+        if (fila.grupo) {
+          const g = indiceGrupos.get(`${idProyFila}|${normalizarNombre(fila.grupo)}`);
+          if (!g) {
+            descartar(fila, 'Grupo', fila.grupo, 'GRUPO_NO_ENCONTRADO',
+              `El grupo "${fila.grupo}" no existe en la planta "${fila.planta}".`);
+            continue;
+          }
+          if (!g.activo) {
+            descartar(fila, 'Grupo', fila.grupo, 'GRUPO_INACTIVO', `El grupo "${fila.grupo}" esta desactivado.`);
+            continue;
+          }
+          idGrupoFila = g.id_grupo;
+          resolucionGrupos[claveGrupo(fila.planta, fila.grupo)] = g.id_grupo;
+        }
+
+        if (fila.serial) {
+          const idInv = resolucionSeriales[fila.serial];
+          if (idInv) {
+            const inv = infoInversor.get(idInv)!;
+            if (inv.id_proyecto !== idProyFila) {
+              descartar(fila, 'Inversor', fila.serial, 'INVERSOR_FUERA_DE_PROYECTO',
+                `El inversor "${fila.serial}" no pertenece a la planta "${fila.planta}".`);
+            } else if (idGrupoFila && inv.id_grupo !== idGrupoFila) {
+              descartar(fila, 'Inversor', fila.serial, 'INVERSOR_FUERA_DE_GRUPO',
+                `El inversor "${fila.serial}" no pertenece al grupo "${fila.grupo}".`);
+            }
+          } else if (fila.grupo) {
+            descartar(fila, 'Inversor', fila.serial, 'SERIAL_NO_ENCONTRADO',
+              `El inversor "${fila.serial}" no esta registrado; la fila no se carga para no asignarla a un destino equivocado.`);
+          }
+        }
+      }
+      if (descartadas.size > 0) lectura.filas = lectura.filas.filter((f) => !descartadas.has(f.fila));
     }
 
     // --- Agrupacion y deteccion de grupos que requieren decision --------
@@ -233,11 +399,32 @@ importacionesRouter.post(
       if (!idProyectoFila) continue;
 
       const idInversorFila = fila.serial ? resolucionSeriales[fila.serial] : idInversor;
+      const idGrupoFilaPrev = idInversorFila
+        ? (infoInversor.get(idInversorFila)?.id_grupo ?? null)
+        : fila.grupo
+          ? (resolucionGrupos[claveGrupo(fila.planta, fila.grupo)] ?? null)
+          : idGrupoFijo;
+
+      // Energia ya sincronizada desde Huawei para ese equipo y periodo.
+      if (idInversorFila && (await huaweiYaCubre(idInversorFila, fila))) {
+        problemas.push({
+          fila: fila.fila,
+          columna: 'Inversor',
+          valor: fila.serial,
+          codigo: 'YA_SINCRONIZADO_HUAWEI',
+          severidad: 'ADVERTENCIA',
+          mensaje:
+            `Huawei ya entrego la produccion de este inversor en ${MESES_ES[fila.mes - 1]} ${fila.anio}. ` +
+            'La fila se omitira al confirmar para no duplicar la energia.',
+        });
+        continue;
+      }
+
       const existente = await queryOne<{ id_produccion: number; kwh: number }>(
         `SELECT id_produccion, kwh FROM produccion
-          WHERE id_proyecto = ? AND COALESCE(id_inversor, 0) = ? AND fecha = ?
-            AND granularidad = ? AND origen = 'MANUAL' AND secuencia = 0 AND activo = 1`,
-        [idProyectoFila, idInversorFila ?? 0, fila.fecha, fila.granularidad],
+          WHERE id_proyecto = ? AND COALESCE(id_inversor, 0) = ? AND COALESCE(id_grupo, 0) = ?
+            AND fecha = ? AND granularidad = ? AND origen = 'MANUAL' AND secuencia = 0 AND activo = 1`,
+        [idProyectoFila, idInversorFila ?? 0, idGrupoFilaPrev ?? 0, fila.fecha, fila.granularidad],
       );
       if (existente) {
         duplicados.push({
@@ -248,6 +435,8 @@ importacionesRouter.post(
     }
 
     // --- Mezcla de niveles de detalle -----------------------------------
+    // Se evalua por destino (grupo): en una planta completa un grupo puede venir
+    // por inversor y otro consolidado sin que eso sea un conflicto.
     const conflictosNivel: Array<{ proyecto: string; anio: number; mes: number; existente: string; entrante: string }> = [];
     for (const grupo of grupos) {
       const idProyectoGrupo =
@@ -256,25 +445,35 @@ importacionesRouter.post(
           : (idProyecto ?? proyectoDelInversor);
       if (!idProyectoGrupo) continue;
 
-      const nivelEntrante =
-        grupo.tieneSerial || idInversor
-          ? 'POR_INVERSOR'
-          : idGrupoFijo
-            ? 'GRUPO_CONSOLIDADO'
-            : 'PROYECTO_CONSOLIDADO';
-      const existente = await queryOne<{ nivel_detalle: string }>(
-        `SELECT DISTINCT nivel_detalle FROM produccion
-          WHERE id_proyecto = ? AND anio = ? AND mes = ? AND activo = 1 AND nivel_detalle <> ?`,
-        [idProyectoGrupo, grupo.anio, grupo.mes, nivelEntrante],
-      );
-      if (existente) {
-        conflictosNivel.push({
-          proyecto: grupo.planta || String(idProyectoGrupo),
-          anio: grupo.anio,
-          mes: grupo.mes,
-          existente: existente.nivel_detalle,
-          entrante: nivelEntrante,
-        });
+      const destinos = new Map<string, { nivel: string; idGrupo: number | null }>();
+      for (const fila of grupo.filas) {
+        const idInvFila = fila.serial ? resolucionSeriales[fila.serial] : idInversor;
+        const idGrupoDestino = idInvFila
+          ? (infoInversor.get(idInvFila)?.id_grupo ?? idGrupoFijo)
+          : fila.grupo
+            ? (resolucionGrupos[claveGrupo(fila.planta, fila.grupo)] ?? null)
+            : idGrupoFijo;
+        const nivel = idInvFila ? 'POR_INVERSOR' : idGrupoDestino ? 'GRUPO_CONSOLIDADO' : 'PROYECTO_CONSOLIDADO';
+        destinos.set(`${nivel}|${idGrupoDestino ?? 0}`, { nivel, idGrupo: idGrupoDestino });
+      }
+
+      for (const destino of destinos.values()) {
+        const existente = await queryOne<{ nivel_detalle: string }>(
+          `SELECT DISTINCT nivel_detalle FROM produccion
+            WHERE id_proyecto = ? AND anio = ? AND mes = ? AND activo = 1 AND nivel_detalle <> ?
+              AND (? IS NULL OR id_grupo = ? OR id_grupo IS NULL)`,
+          [idProyectoGrupo, grupo.anio, grupo.mes, destino.nivel, destino.idGrupo, destino.idGrupo],
+        );
+        if (existente) {
+          conflictosNivel.push({
+            proyecto: grupo.planta || String(idProyectoGrupo),
+            anio: grupo.anio,
+            mes: grupo.mes,
+            existente: existente.nivel_detalle,
+            entrante: destino.nivel,
+          });
+          break;
+        }
       }
     }
 
@@ -401,6 +600,10 @@ importacionesRouter.post(
       idInversorFijo: idInversor,
       resolucionPlantas,
       resolucionSeriales,
+      resolucionGrupos,
+      grupoDeInversor: Object.fromEntries(
+        [...infoInversor.entries()].map(([id, i]) => [id, i.id_grupo]),
+      ),
       totalFilasLeidas: lectura.totalFilasLeidas,
     };
     guardarLotePreparado(idHistorico, lote);
@@ -572,28 +775,51 @@ importacionesRouter.post(
     }
 
     // Prevencion de doble conteo entre consolidado y detalle por inversor.
+    // Se evalua por destino (grupo): grupos distintos de una misma planta pueden
+    // venir en niveles distintos sin duplicar energia.
+    const destinoDeFila = (fila: FilaCanonica, decision: string | undefined) => {
+      const idInv =
+        decision === 'MAPEAR'
+          ? (opciones.mapeoFilas[String(fila.fila)] ?? null)
+          : fila.serial
+            ? (lote.resolucionSeriales[fila.serial] ?? null)
+            : lote.idInversorFijo;
+      const idGrupoDestino = idInv
+        ? (lote.grupoDeInversor[idInv] ?? lote.idGrupoFijo)
+        : fila.grupo
+          ? (lote.resolucionGrupos[claveGrupo(fila.planta, fila.grupo)] ?? null)
+          : lote.idGrupoFijo;
+      const nivel = idInv ? 'POR_INVERSOR' : idGrupoDestino ? 'GRUPO_CONSOLIDADO' : 'PROYECTO_CONSOLIDADO';
+      return { idInv, idGrupoDestino, nivel };
+    };
+
     if (!opciones.confirmarMezclaNiveles) {
       for (const grupo of grupos) {
         if (opciones.decisiones[grupo.clave] === 'RECHAZAR') continue;
         const idProyecto = idProyectoDe(grupo.planta)!;
         const decision = opciones.decisiones[grupo.clave];
-        const nivelEntrante =
-          decision === 'MAPEAR' || grupo.tieneSerial || lote.idInversorFijo
-            ? 'POR_INVERSOR'
-            : lote.idGrupoFijo
-              ? 'GRUPO_CONSOLIDADO'
-              : 'PROYECTO_CONSOLIDADO';
 
-        const conflicto = await queryOne<{ nivel_detalle: string }>(
-          `SELECT DISTINCT nivel_detalle FROM produccion
-            WHERE id_proyecto = ? AND anio = ? AND mes = ? AND activo = 1 AND nivel_detalle <> ?`,
-          [idProyecto, grupo.anio, grupo.mes, nivelEntrante],
-        );
-        if (conflicto) {
-          throw errores.reglaNegocio(
-            `Para ${grupo.planta} en ${MESES_ES[grupo.mes - 1]} ${grupo.anio} ya existe produccion registrada como ${conflicto.nivel_detalle} y este lote es ${nivelEntrante}. Mezclar ambos niveles duplicaria la energia. Revise el caso y confirme explicitamente si desea continuar.`,
-            { clave: grupo.clave, existente: conflicto.nivel_detalle, entrante: nivelEntrante },
+        const destinos = new Map<string, { nivel: string; idGrupo: number | null }>();
+        for (const fila of grupo.filas) {
+          const d = destinoDeFila(fila, decision);
+          const nivel = decision === 'SUMAR' ? (lote.idGrupoFijo ? 'GRUPO_CONSOLIDADO' : 'PROYECTO_CONSOLIDADO') : d.nivel;
+          const idGrupo = decision === 'SUMAR' ? lote.idGrupoFijo : d.idGrupoDestino;
+          destinos.set(`${nivel}|${idGrupo ?? 0}`, { nivel, idGrupo });
+        }
+
+        for (const destino of destinos.values()) {
+          const conflicto = await queryOne<{ nivel_detalle: string }>(
+            `SELECT DISTINCT nivel_detalle FROM produccion
+              WHERE id_proyecto = ? AND anio = ? AND mes = ? AND activo = 1 AND nivel_detalle <> ?
+                AND (? IS NULL OR id_grupo = ? OR id_grupo IS NULL)`,
+            [idProyecto, grupo.anio, grupo.mes, destino.nivel, destino.idGrupo, destino.idGrupo],
           );
+          if (conflicto) {
+            throw errores.reglaNegocio(
+              `Para ${grupo.planta} en ${MESES_ES[grupo.mes - 1]} ${grupo.anio} ya existe produccion registrada como ${conflicto.nivel_detalle} y este lote es ${destino.nivel}. Mezclar ambos niveles duplicaria la energia. Revise el caso y confirme explicitamente si desea continuar.`,
+              { clave: grupo.clave, existente: conflicto.nivel_detalle, entrante: destino.nivel },
+            );
+          }
         }
       }
     }
@@ -632,6 +858,9 @@ importacionesRouter.post(
           /** Filas efectivas a insertar segun la decision tomada. */
           type Registro = {
             idInversor: number | null;
+            /** Grupo destino ya resuelto para filas por grupo (sin inversor). */
+            idGrupo: number | null;
+            fechaFila: string;
             kwh: number;
             secuencia: number;
             comentarios: string | null;
@@ -642,6 +871,8 @@ importacionesRouter.post(
           if (decision === 'SUMAR') {
             registros.push({
               idInversor: null,
+              idGrupo: lote.idGrupoFijo,
+              fechaFila: grupo.filas[0].fecha,
               kwh: grupo.kwhTotal,
               secuencia: 0,
               comentarios:
@@ -653,7 +884,11 @@ importacionesRouter.post(
               filaOrigen: grupo.filas[0].fila,
             });
           } else {
-            grupo.filas.forEach((fila, indice) => {
+            // La secuencia distingue componentes REPETIDOS del mismo destino; no
+            // depende del orden de las filas de otros grupos o equipos, de modo
+            // que volver a cargar el archivo actualiza los mismos registros.
+            const ordinalPorDestino = new Map<string, number>();
+            grupo.filas.forEach((fila) => {
               let idInversor: number | null = null;
               if (decision === 'MAPEAR') {
                 idInversor = opciones.mapeoFilas[String(fila.fila)] ?? null;
@@ -675,12 +910,21 @@ importacionesRouter.post(
                 idInversor = lote.idInversorFijo;
               }
 
+              const idGrupoFila = idInversor
+                ? null
+                : fila.grupo
+                  ? (lote.resolucionGrupos[claveGrupo(fila.planta, fila.grupo)] ?? null)
+                  : lote.idGrupoFijo;
+              const destinoClave = `${idInversor ?? 0}|${idGrupoFila ?? 0}`;
+              const ordinal = ordinalPorDestino.get(destinoClave) ?? 0;
+              ordinalPorDestino.set(destinoClave, ordinal + 1);
+
               registros.push({
                 idInversor,
+                idGrupo: idGrupoFila,
+                fechaFila: fila.fecha,
                 kwh: fila.kwh,
-                // Cuando hay varias filas del mismo periodo y nivel, `secuencia`
-                // las distingue como componentes legitimos (no duplicados).
-                secuencia: decision === 'COMPONENTES' || (!idInversor && grupo.filas.length > 1) ? indice : 0,
+                secuencia: ordinal,
                 comentarios: fila.comentarios,
                 filaOrigen: fila.fila,
               });
@@ -692,11 +936,14 @@ importacionesRouter.post(
           const grupoDeInversor = new Map<number, number>();
           for (const registro of registros) {
             if (registro.idInversor && !grupoDeInversor.has(registro.idInversor)) {
-              const inv = await queryOne<{ id_grupo: number }>(
-                'SELECT id_grupo FROM inversores WHERE id_inversor = ?',
-                [registro.idInversor],
-                conn,
-              );
+              const enLote = lote.grupoDeInversor[registro.idInversor];
+              const inv = enLote
+                ? { id_grupo: enLote }
+                : await queryOne<{ id_grupo: number }>(
+                    'SELECT id_grupo FROM inversores WHERE id_inversor = ?',
+                    [registro.idInversor],
+                    conn,
+                  );
               if (inv) grupoDeInversor.set(registro.idInversor, inv.id_grupo);
             }
           }
@@ -704,7 +951,7 @@ importacionesRouter.post(
           for (const registro of registros) {
             const idGrupoRegistro = registro.idInversor
               ? (grupoDeInversor.get(registro.idInversor) ?? null)
-              : lote.idGrupoFijo;
+              : registro.idGrupo;
             const nivel = registro.idInversor
               ? 'POR_INVERSOR'
               : idGrupoRegistro
@@ -718,6 +965,28 @@ importacionesRouter.post(
             const filaOriginal = grupo.filas.find((f) => f.fila === registro.filaOrigen);
             const fechaFinal =
               granularidad === 'DIARIA' && filaOriginal ? filaOriginal.fecha : fechaReal;
+
+            // Si Huawei ya entrego este equipo en el periodo, la fila manual se
+            // omite: sumarla duplicaria la energia.
+            if (
+              registro.idInversor &&
+              (await huaweiYaCubre(
+                registro.idInversor,
+                { anio: grupo.anio, mes: grupo.mes, fecha: fechaFinal, granularidad },
+                conn,
+              ))
+            ) {
+              omitidas += 1;
+              erroresProceso.push({
+                fila: registro.filaOrigen,
+                columna: 'Inversor',
+                valor: null,
+                codigo: 'YA_SINCRONIZADO_HUAWEI',
+                severidad: 'ADVERTENCIA',
+                mensaje: `Huawei ya entrego la produccion de este inversor en ${MESES_ES[grupo.mes - 1]} ${grupo.anio}; la fila manual se omitio para no duplicar energia.`,
+              });
+              continue;
+            }
 
             const valorizacion = await calcularValorizacion(
               idProyecto,

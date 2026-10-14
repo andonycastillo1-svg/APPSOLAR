@@ -178,34 +178,87 @@ export function ahoraLocal(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Trimestres
+// Trimestres tarifarios
 //
-// La tarifa del kWh tiene vigencia TRIMESTRAL sobre trimestres calendario.
-// La produccion y la proyeccion siguen siendo mensuales: solo la tarifa
-// cambia de periodicidad.
+// La tarifa del kWh tiene vigencia TRIMESTRAL, pero los trimestres NO son los
+// calendario: el primer periodo inicia en noviembre.
+//
+//   I   trimestre: Noviembre - Diciembre - Enero
+//   II  trimestre: Febrero   - Marzo     - Abril
+//   III trimestre: Mayo      - Junio     - Julio
+//   IV  trimestre: Agosto    - Septiembre- Octubre
+//
+// Un "anio tarifario" va de noviembre a octubre y se identifica con el anio
+// calendario en que INICIA (el anio tarifario 2025 es nov-2025 a oct-2026).
+// La produccion y la proyeccion siguen siendo mensuales: solo la tarifa usa
+// estos periodos.
 // ---------------------------------------------------------------------------
 
 export const TRIMESTRES = [
-  { numero: 1, etiqueta: 'I trimestre', meses: 'Enero a Marzo' },
-  { numero: 2, etiqueta: 'II trimestre', meses: 'Abril a Junio' },
-  { numero: 3, etiqueta: 'III trimestre', meses: 'Julio a Septiembre' },
-  { numero: 4, etiqueta: 'IV trimestre', meses: 'Octubre a Diciembre' },
+  { numero: 1, etiqueta: 'I trimestre', meses: 'Noviembre a Enero' },
+  { numero: 2, etiqueta: 'II trimestre', meses: 'Febrero a Abril' },
+  { numero: 3, etiqueta: 'III trimestre', meses: 'Mayo a Julio' },
+  { numero: 4, etiqueta: 'IV trimestre', meses: 'Agosto a Octubre' },
 ];
 
-/** Trimestre calendario (1..4) al que pertenece un mes. */
-export function trimestreDeMes(mes: number): number {
-  return Math.ceil(mes / 3);
+const ABREVIATURAS_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/**
+ * Expresiones SQL equivalentes a las funciones de abajo, para agrupar o
+ * filtrar registros con columnas (anio, mes) por periodo tarifario.
+ */
+export function sqlAnioTarifario(columnaAnio = 'anio', columnaMes = 'mes'): string {
+  return `IF(${columnaMes} >= 11, ${columnaAnio}, ${columnaAnio} - 1)`;
 }
 
-/** Los tres meses que componen un trimestre. */
+export function sqlTrimestre(columnaMes = 'mes'): string {
+  return `(FLOOR((${columnaMes} + 1) % 12 / 3) + 1)`;
+}
+
+/** Trimestre tarifario (1..4) al que pertenece un mes calendario. */
+export function trimestreDeMes(mes: number): number {
+  return Math.floor(((mes + 1) % 12) / 3) + 1;
+}
+
+/** Anio tarifario (el anio en que inicia el noviembre) de un mes calendario. */
+export function anioTarifario(anio: number, mes: number): number {
+  return mes >= 11 ? anio : anio - 1;
+}
+
+/** Periodo tarifario (anio tarifario + trimestre) de un mes calendario. */
+export function periodoTarifario(anio: number, mes: number): { anio: number; trimestre: number } {
+  return { anio: anioTarifario(anio, mes), trimestre: trimestreDeMes(mes) };
+}
+
+/** Los tres meses calendario que componen un trimestre (1 = 11, 12, 1). */
 export function mesesDelTrimestre(trimestre: number): number[] {
-  const primero = (trimestre - 1) * 3 + 1;
-  return [primero, primero + 1, primero + 2];
+  const primero = trimestre === 1 ? 11 : (trimestre - 2) * 3 + 2;
+  return [0, 1, 2].map((i) => ((primero - 1 + i) % 12) + 1);
+}
+
+/** Los tres (anio, mes) concretos de un trimestre de un anio tarifario. */
+export function mesesDelPeriodoTarifario(
+  anioTarif: number,
+  trimestre: number,
+): Array<{ anio: number; mes: number }> {
+  return mesesDelTrimestre(trimestre).map((mes) => ({
+    // Nov y Dic pertenecen al anio de inicio; el resto, al siguiente.
+    anio: mes >= 11 ? anioTarif : anioTarif + 1,
+    mes,
+  }));
+}
+
+function rangoTrimestre(anio: number, trimestre: number): string {
+  const meses = mesesDelPeriodoTarifario(anio, trimestre);
+  const primero = meses[0];
+  const ultimo = meses[2];
+  return `${ABREVIATURAS_MES[primero.mes - 1]} ${primero.anio} a ${ABREVIATURAS_MES[ultimo.mes - 1]} ${ultimo.anio}`;
 }
 
 export function etiquetaTrimestre(anio: number, trimestre: number): string {
   const definicion = TRIMESTRES[trimestre - 1];
-  return definicion ? `${definicion.etiqueta} ${anio}` : `T${trimestre} ${anio}`;
+  if (!definicion) return `T${trimestre} ${anio}`;
+  return `${definicion.etiqueta} ${anio} (${rangoTrimestre(anio, trimestre)})`;
 }
 
 export function nombreMesesTrimestre(trimestre: number): string {
@@ -213,17 +266,19 @@ export function nombreMesesTrimestre(trimestre: number): string {
 }
 
 export function primerDiaTrimestre(anio: number, trimestre: number): string {
-  return primerDiaMes(anio, (trimestre - 1) * 3 + 1);
+  const primero = mesesDelPeriodoTarifario(anio, trimestre)[0];
+  return primerDiaMes(primero.anio, primero.mes);
 }
 
 export function ultimoDiaTrimestre(anio: number, trimestre: number): string {
-  return ultimoDiaMes(anio, trimestre * 3);
+  const ultimo = mesesDelPeriodoTarifario(anio, trimestre)[2];
+  return ultimoDiaMes(ultimo.anio, ultimo.mes);
 }
 
 /** Trimestre en curso segun la fecha civil de Guatemala. */
 export function trimestreActual(): { anio: number; trimestre: number } {
   const hoy = hoyISO();
-  return { anio: Number(hoy.slice(0, 4)), trimestre: trimestreDeMes(Number(hoy.slice(5, 7))) };
+  return periodoTarifario(Number(hoy.slice(0, 4)), Number(hoy.slice(5, 7)));
 }
 
 export function trimestreSiguiente(anio: number, trimestre: number): { anio: number; trimestre: number } {
@@ -243,11 +298,11 @@ export function trimestresDelPeriodo(periodo: Periodo): Array<{ anio: number; tr
   const salida: Array<{ anio: number; trimestre: number }> = [];
 
   for (const mes of mesesDelPeriodo(periodo)) {
-    const trimestre = trimestreDeMes(mes.mes);
-    const clave = `${mes.anio}-${trimestre}`;
+    const p = periodoTarifario(mes.anio, mes.mes);
+    const clave = `${p.anio}-${p.trimestre}`;
     if (!vistos.has(clave)) {
       vistos.add(clave);
-      salida.push({ anio: mes.anio, trimestre });
+      salida.push(p);
     }
   }
   return salida;

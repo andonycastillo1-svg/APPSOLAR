@@ -17,6 +17,7 @@ import {
 import { Tabla } from '../components/Tabla';
 import {
   anioActual,
+  anioTarifarioActual,
   claseEstado,
   fecha,
   fechaHora,
@@ -41,6 +42,10 @@ interface DetalleProyecto {
   cliente_nit: string;
   ubicacion: string | null;
   tipo_proyecto: string;
+  suministradora: 'DISTRIBUIDORA' | 'COMERCIALIZADORA' | null;
+  tipo_tarifa_sigla: string | null;
+  tipo_tarifa_nombre: string | null;
+  valor_pactado_kwh: number | null;
   capacidad_kwp: number | null;
   fecha_inicio: string | null;
   observaciones: string | null;
@@ -183,9 +188,11 @@ function etiquetaTrimestre(trimestre: number): string {
   return `${ROMANOS[trimestre - 1] ?? trimestre} trimestre`;
 }
 
+// Trimestres tarifarios: inician en noviembre.
 function mesesDelTrimestre(trimestre: number): string {
-  const primero = (trimestre - 1) * 3 + 1;
-  return `${nombreMes(primero)} a ${nombreMes(primero + 2)}`;
+  const primero = trimestre === 1 ? 11 : (trimestre - 2) * 3 + 2;
+  const ultimo = ((primero + 1) % 12) + 1;
+  return `${nombreMes(primero)} a ${nombreMes(ultimo)}`;
 }
 
 /** Grupo de inversores: nivel intermedio entre el proyecto y el equipo. */
@@ -264,6 +271,15 @@ export function PaginaProyectoDetalle() {
           <h1>{p.nombre}</h1>
           <div className="acciones" style={{ marginTop: '0.35rem' }}>
             <span className="etiqueta etiqueta--azul">{p.tipo_proyecto}</span>
+            {p.suministradora ? (
+              <span className="etiqueta etiqueta--gris" title={p.tipo_tarifa_nombre ?? undefined}>
+                {p.suministradora === 'DISTRIBUIDORA' ? 'Distribuidora' : 'Comercializadora'}
+                {p.tipo_tarifa_sigla ? ` · ${p.tipo_tarifa_sigla}` : ''}
+              </span>
+            ) : null}
+            {p.suministradora === 'COMERCIALIZADORA' && p.valor_pactado_kwh !== null ? (
+              <span className="etiqueta etiqueta--verde">Pactado Q {numero(p.valor_pactado_kwh, 4)}/kWh</span>
+            ) : null}
             <span className={p.activo ? 'etiqueta etiqueta--verde' : 'etiqueta etiqueta--gris'}>
               {p.activo ? 'Activo' : 'Inactivo'}
             </span>
@@ -305,7 +321,11 @@ export function PaginaProyectoDetalle() {
       {pestana === 'resumen' ? <Resumen proyecto={p} /> : null}
       {pestana === 'grupos' ? <PanelGrupos idProyecto={idProyecto} /> : null}
       {pestana === 'tarifas' ? (
-        puede('tarifas.ver') ? <PanelTarifas idProyecto={idProyecto} /> : <SinPermiso permiso="tarifas.ver" />
+        puede('tarifas.ver') ? (
+          <PanelTarifas idProyecto={idProyecto} pactada={proyecto.data.suministradora === 'COMERCIALIZADORA' && proyecto.data.valor_pactado_kwh !== null} />
+        ) : (
+          <SinPermiso permiso="tarifas.ver" />
+        )
       ) : null}
       {pestana === 'proyecciones' ? (
         puede('proyecciones.ver') ? (
@@ -1153,10 +1173,11 @@ function ModalPaneles({
 // Tarifas de energia
 // ---------------------------------------------------------------------------
 
-function PanelTarifas({ idProyecto }: { idProyecto: number }) {
+function PanelTarifas({ idProyecto, pactada }: { idProyecto: number; pactada: boolean }) {
   const { puede } = useSesion();
   const clienteConsultas = useQueryClient();
-  const [anio, setAnio] = useState(anioActual());
+  // El anio es el TARIFARIO: inicia en noviembre y termina en octubre.
+  const [anio, setAnio] = useState(anioTarifarioActual());
   const [exito, setExito] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -1173,9 +1194,10 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
     { fila: FilaCalendarioTarifa; mes: number; abrir: boolean; motivo: string } | null
   >(null);
 
-  const gestionar = puede('tarifas.gestionar');
-  const aprobar = puede('tarifas.aprobar');
-  const recalcular = puede('tarifas.recalcular');
+  // Comercializadora: la tarifa es el valor pactado y no se captura aqui.
+  const gestionar = !pactada && puede('tarifas.gestionar');
+  const aprobar = !pactada && puede('tarifas.aprobar');
+  const recalcular = !pactada && puede('tarifas.recalcular');
 
   const consulta = useQuery({
     queryKey: ['tarifas', idProyecto, anio],
@@ -1209,12 +1231,19 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
   });
 
   const datos = consulta.data;
-  const anios = Array.from({ length: 8 }, (_, i) => anioActual() - i);
+  const anios = Array.from({ length: 8 }, (_, i) => anioTarifarioActual() + 1 - i);
 
   return (
     <>
       {exito ? <MensajeExito>{exito}</MensajeExito> : null}
       {error ? <MensajeError error={error} /> : null}
+
+      {pactada ? (
+        <MensajeInfo titulo="Proyecto de comercializadora">
+          Este proyecto trabaja con el <strong>valor pactado</strong> del contrato: la tarifa es fija y
+          no se renueva cada trimestre. Para modificarla edite el proyecto (queda con motivo y auditoria).
+        </MensajeInfo>
+      ) : null}
 
       {/* Aviso de actualizacion trimestral: el costo del kWh se pacta cada
           trimestre, asi que el sistema recuerda registrarlo a tiempo. */}
@@ -1233,16 +1262,21 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
         <div className="tarjeta__titulo">
           <h2>Tarifas de energia (Q por kWh) · vigencia trimestral</h2>
           <div className="acciones no-imprimir">
-            <CampoSelect etiqueta="Año" value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
+            <CampoSelect
+              etiqueta="Año tarifario"
+              value={anio}
+              onChange={(e) => setAnio(Number(e.target.value))}
+            >
               {anios.map((a) => (
-                <option key={a} value={a}>{a}</option>
+                <option key={a} value={a}>{`${a} (nov ${a} - oct ${a + 1})`}</option>
               ))}
             </CampoSelect>
           </div>
         </div>
 
         <MensajeInfo>
-          El costo del kWh se pacta <strong>por trimestre calendario</strong>: los tres meses de un
+          El costo del kWh se actualiza <strong>por trimestre</strong>, y los trimestres inician en{' '}
+          <strong>noviembre</strong> (nov-ene, feb-abr, may-jul, ago-oct): los tres meses de un
           trimestre comparten siempre la misma tarifa. Solo una tarifa <strong>APROBADA</strong> puede
           usarse en reportes oficiales. Si un trimestre no tiene tarifa, la energia se conserva y su
           valor economico queda <strong>pendiente de tarifa</strong>: nunca se asume cero ni se arrastra
@@ -1255,7 +1289,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
               <div className="indicador indicador--verde">
                 <p className="indicador__etiqueta">Trimestres aprobados</p>
                 <p className="indicador__valor">{datos.resumen.trimestresAprobados}</p>
-                <p className="indicador__detalle">de 4 en el año {anio}</p>
+                <p className="indicador__detalle">de 4 en el año tarifario {anio}</p>
               </div>
               <div className="indicador indicador--ambar">
                 <p className="indicador__etiqueta">En borrador</p>
@@ -1280,7 +1314,7 @@ function PanelTarifas({ idProyecto }: { idProyecto: number }) {
 
             <div className="tabla-envoltura">
               <table>
-                <caption>Calendario trimestral de tarifas del año {anio}.</caption>
+                <caption>Calendario trimestral de tarifas del año tarifario {anio} (nov {anio} - oct {anio + 1}).</caption>
                 <thead>
                   <tr>
                     <th scope="col">Trimestre</th>
@@ -2003,8 +2037,8 @@ function PanelProyecciones({ idProyecto }: { idProyecto: number }) {
                 <thead>
                   <tr>
                     <th scope="col">Mes</th>
-                    <th scope="col" className="num">Proyeccion kWh</th>
-                    <th scope="col" className="num">Generacion real kWh</th>
+                    <th scope="col" className="num">Proyección</th>
+                    <th scope="col" className="num">Generación real</th>
                     <th scope="col" className="num">Cumplimiento</th>
                     <th scope="col">Estado</th>
                     <th scope="col">Origen</th>
@@ -2019,22 +2053,25 @@ function PanelProyecciones({ idProyecto }: { idProyecto: number }) {
                       </th>
                       <td className="num">
                         {editando ? (
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.0001"
-                            aria-label={`Proyeccion de ${fila.mesNombre}`}
-                            value={valores[fila.mes] ?? ''}
-                            onChange={(e) => setValores({ ...valores, [fila.mes]: e.target.value })}
-                            style={{ width: '130px', textAlign: 'right' }}
-                          />
+                          <>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.0001"
+                              aria-label={`Proyeccion de ${fila.mesNombre} en kWh`}
+                              value={valores[fila.mes] ?? ''}
+                              onChange={(e) => setValores({ ...valores, [fila.mes]: e.target.value })}
+                              style={{ width: '130px', textAlign: 'right' }}
+                            />{' '}
+                            kWh
+                          </>
                         ) : fila.proyeccion ? (
-                          numero(fila.proyeccion.proyeccion_kwh)
+                          kwh(fila.proyeccion.proyeccion_kwh)
                         ) : (
                           <span style={{ color: 'var(--texto-suave)' }}>—</span>
                         )}
                       </td>
-                      <td className="num">{numero(fila.generacion_kwh)}</td>
+                      <td className="num">{kwh(fila.generacion_kwh)}</td>
                       <td className="num">
                         {fila.etiquetaCumplimiento ? (
                           <span style={{ color: 'var(--texto-suave)' }}>{fila.etiquetaCumplimiento}</span>

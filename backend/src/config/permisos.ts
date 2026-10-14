@@ -30,6 +30,7 @@ export const PERMISOS = {
   HUAWEI_VER: 'huawei.ver',
   HUAWEI_CONFIGURAR: 'huawei.configurar',
   HUAWEI_SINCRONIZAR: 'huawei.sincronizar',
+  PRODUCCION_SINCRONIZAR_AHORA: 'produccion.sincronizar_ahora',
   DASHBOARD_VER: 'dashboard.ver',
   REPORTES_VER: 'reportes.ver',
   REPORTES_GENERAR: 'reportes.generar',
@@ -64,13 +65,14 @@ export const PERMISOS_POR_ROL: Record<RolCodigo, Permiso[]> = {
     PERMISOS.PROYECCIONES_VER,
     PERMISOS.HUAWEI_VER,
     PERMISOS.HUAWEI_SINCRONIZAR,
+    PERMISOS.PRODUCCION_SINCRONIZAR_AHORA,
     PERMISOS.DASHBOARD_VER,
     PERMISOS.REPORTES_VER,
     PERMISOS.REPORTES_GENERAR,
     PERMISOS.REPORTES_EXPORTAR,
   ],
 
-  // Estrictamente solo lectura: ningun permiso de escritura.
+  // Solo lectura, salvo el boton "Sincronizar ahora" (produccion.sincronizar_ahora).
   GERENCIAL: [
     PERMISOS.CLIENTES_VER,
     PERMISOS.PROYECTOS_VER,
@@ -79,6 +81,8 @@ export const PERMISOS_POR_ROL: Record<RolCodigo, Permiso[]> = {
     PERMISOS.TARIFAS_VER,
     PERMISOS.PROYECCIONES_VER,
     PERMISOS.IMPORTACIONES_VER,
+    // Unica accion que no es lectura: refrescar los datos desde el fabricante.
+    PERMISOS.PRODUCCION_SINCRONIZAR_AHORA,
     PERMISOS.DASHBOARD_VER,
     PERMISOS.REPORTES_VER,
     PERMISOS.REPORTES_GENERAR,

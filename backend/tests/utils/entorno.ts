@@ -135,8 +135,9 @@ export async function crearDatosBase(sufijo = ''): Promise<DatosBase> {
   );
 
   const proyecto = await execute(
-    `INSERT INTO proyectos (id_cliente, nombre, ubicacion, tipo_proyecto, capacidad_kwp, activo)
-     VALUES (?, ?, ?, 'PPA', 500, 1)`,
+    `INSERT INTO proyectos (id_cliente, nombre, ubicacion, tipo_proyecto, suministradora,
+                            id_tipo_tarifa, capacidad_kwp, activo)
+     VALUES (?, ?, ?, 'PPA', 'DISTRIBUIDORA', (SELECT MIN(id_tipo_tarifa) FROM tipos_tarifa), 500, 1)`,
     [cliente.insertId, `Planta Pruebas${sufijo}`, 'Escuintla'],
   );
 
@@ -176,7 +177,7 @@ export async function crearDatosBase(sufijo = ''): Promise<DatosBase> {
   };
 }
 
-/** La tarifa tiene vigencia TRIMESTRAL (trimestres calendario). */
+/** La tarifa tiene vigencia TRIMESTRAL; `anio` es el anio tarifario (inicia en noviembre). */
 export async function crearTarifaAprobada(
   idProyecto: number,
   anio: number,
@@ -336,6 +337,9 @@ export function cuerpoAltaProyecto(
     id_cliente: idCliente,
     nombre,
     tipo_proyecto: 'PPA',
+    suministradora: 'DISTRIBUIDORA',
+    // El catalogo de tipos de tarifa lo siembra la migracion 010.
+    id_tipo_tarifa: 1,
     proyeccion: {
       anio: 2026,
       aprobarInmediato: true,

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { api, ErrorApi } from '../lib/api';
 import { NOMBRE_ROL, useSesion } from '../lib/auth';
 import { MensajeAlerta } from './Estados';
 
@@ -51,9 +52,89 @@ const NAVEGACION: Grupo[] = [
   },
 ];
 
+interface ResultadoSincronizacionAhora {
+  estado: string;
+  insertadas: number;
+  actualizadas: number;
+  rechazadas: number;
+  hasta: string;
+  mensaje: string;
+  advertencias: string[];
+  esSimulado: boolean;
+  proyectosNuevos: string[];
+  inversoresSinDatos: string[];
+}
+
+/**
+ * Botón del menú principal: trae de Huawei toda la producción hasta este
+ * momento, sin pedir fechas. Repetirlo es seguro: actualiza, no suma.
+ */
+function BotonSincronizarAhora({ alTerminar }: { alTerminar: () => void }) {
+  const [estado, setEstado] = useState<'reposo' | 'sincronizando'>('reposo');
+  const [resultado, setResultado] = useState<{ tipo: 'exito' | 'aviso' | 'error'; texto: string; detalle?: string[] } | null>(null);
+
+  async function sincronizar() {
+    setEstado('sincronizando');
+    setResultado(null);
+    try {
+      const r = await api.crear<ResultadoSincronizacionAhora>('/integrations/huawei/sync-now', {});
+      const d = r.datos;
+      const conAvisos = d.estado !== 'COMPLETADA' || d.advertencias.length > 0;
+      setResultado({
+        tipo: conAvisos ? 'aviso' : 'exito',
+        texto: `${d.esSimulado ? '(Datos simulados) ' : ''}${d.mensaje}`,
+        detalle: d.advertencias.slice(0, 4),
+      });
+      alTerminar();
+    } catch (error) {
+      setResultado({
+        tipo: 'error',
+        texto: error instanceof ErrorApi || error instanceof Error ? error.message : 'No se pudo sincronizar.',
+      });
+    } finally {
+      setEstado('reposo');
+    }
+  }
+
+  return (
+    <div className="lateral__sync">
+      <button
+        type="button"
+        className="boton boton--verde lateral__sync-boton"
+        onClick={() => void sincronizar()}
+        disabled={estado === 'sincronizando'}
+        aria-busy={estado === 'sincronizando'}
+      >
+        <span aria-hidden="true">⟳</span>{' '}
+        {estado === 'sincronizando' ? 'Sincronizando…' : 'Sincronizar ahora'}
+      </button>
+      <p className="lateral__sync-ayuda">Trae toda la producción de Huawei hasta este momento.</p>
+      {estado === 'sincronizando' ? (
+        <p className="lateral__sync-resultado" role="status">
+          Consultando a Huawei, esto puede tardar un minuto…
+        </p>
+      ) : null}
+      {resultado ? (
+        <div className={`lateral__sync-resultado lateral__sync-resultado--${resultado.tipo}`} role={resultado.tipo === 'error' ? 'alert' : 'status'}>
+          {resultado.texto}
+          {resultado.detalle && resultado.detalle.length > 0 ? (
+            <ul>
+              {resultado.detalle.map((linea) => (
+                <li key={linea}>{linea}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function Layout() {
-  const { usuario, cerrarSesion, puedeAlguno, debeCambiarPassword } = useSesion();
+  const { usuario, cerrarSesion, puede, puedeAlguno, debeCambiarPassword } = useSesion();
   const [menuAbierto, setMenuAbierto] = useState(false);
+  // Al terminar una sincronización se vuelve a montar la pantalla activa para que muestre los datos nuevos.
+  const [versionDatos, setVersionDatos] = useState(0);
   const navegar = useNavigate();
   const ubicacion = useLocation();
 
@@ -90,6 +171,9 @@ export function Layout() {
             </div>
           ))}
         </nav>
+        {puede('produccion.sincronizar_ahora') ? (
+          <BotonSincronizarAhora alTerminar={() => setVersionDatos((v) => v + 1)} />
+        ) : null}
       </aside>
 
       <header className="encabezado">
@@ -140,7 +224,9 @@ export function Layout() {
             para continuar trabajando con seguridad.
           </MensajeAlerta>
         ) : null}
-        <Outlet />
+        <Fragment key={versionDatos}>
+          <Outlet />
+        </Fragment>
       </main>
     </div>
   );

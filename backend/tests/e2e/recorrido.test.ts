@@ -121,6 +121,8 @@ describe('Recorrido completo de punta a punta', () => {
         id_cliente: idCliente,
         nombre: 'Planta Recorrido PPA',
         tipo_proyecto: 'PPA',
+        suministradora: 'DISTRIBUIDORA',
+        id_tipo_tarifa: 1,
         capacidad_kwp: 500,
         ubicacion: 'Escuintla',
         proyeccion: {
@@ -149,6 +151,9 @@ describe('Recorrido completo de punta a punta', () => {
         id_cliente: idCliente,
         nombre: 'Planta Recorrido EPC',
         tipo_proyecto: 'EPC',
+        suministradora: 'COMERCIALIZADORA',
+        id_tipo_tarifa: 1,
+        valor_pactado_kwh: 0.9,
         capacidad_kwp: 300,
         proyeccion: {
           anio: 2025,
@@ -256,15 +261,20 @@ describe('Recorrido completo de punta a punta', () => {
       .send({ anio: 2026, trimestre: 1, costo_kwh: 1.1 })
       .expect(403);
 
-    // Una tarifa por trimestre calendario: los tres meses de un trimestre
-    // comparten siempre el mismo costo por kWh.
+    // Una tarifa por trimestre tarifario (Nov-Ene, Feb-Abr, May-Jul, Ago-Oct):
+    // los tres meses comparten siempre el mismo costo por kWh. El anio es el
+    // tarifario: 2025 va de noviembre 2025 a octubre 2026.
     const tarifas: Array<{ proyecto: number; anio: number; trimestre: number; costo: number }> = [
-      { proyecto: idProyectoPpa, anio: 2025, trimestre: 1, costo: 1.0 },
-      { proyecto: idProyectoPpa, anio: 2026, trimestre: 1, costo: 1.2 },
-      { proyecto: idProyectoPpa, anio: 2026, trimestre: 2, costo: 1.5 },
-      { proyecto: idProyectoEpc, anio: 2025, trimestre: 1, costo: 0.9 },
-      { proyecto: idProyectoEpc, anio: 2025, trimestre: 2, costo: 0.95 },
+      { proyecto: idProyectoPpa, anio: 2024, trimestre: 4, costo: 1.0 },
+      { proyecto: idProyectoPpa, anio: 2025, trimestre: 1, costo: 1.2 },
+      { proyecto: idProyectoPpa, anio: 2025, trimestre: 2, costo: 1.5 },
     ];
+
+    // La comercializadora no captura tarifas: rige su valor pactado.
+    await comoUsuario(coordinador)
+      .post(`/api/projects/${idProyectoEpc}/rates`)
+      .send({ anio: 2025, trimestre: 1, costo_kwh: 0.5 })
+      .expect(409);
 
     for (const tarifa of tarifas) {
       const creada = await comoUsuario(coordinador)
@@ -279,7 +289,7 @@ describe('Recorrido completo de punta a punta', () => {
     }
 
     const calendario = await comoUsuario(coordinador)
-      .get(`/api/projects/${idProyectoPpa}/rates?anio=2026`)
+      .get(`/api/projects/${idProyectoPpa}/rates?anio=2025`)
       .expect(200);
     expect(calendario.body.datos.periodicidad).toBe('TRIMESTRAL');
     expect(calendario.body.datos.resumen.trimestresAprobados).toBe(2);
@@ -287,7 +297,7 @@ describe('Recorrido completo de punta a punta', () => {
   });
 
   it('5. el operativo carga el formato historico del Excel con filas del mismo mes', async () => {
-    // Enero cae en el I trimestre (Q 0.90) y abril en el II (Q 0.95).
+    // Enero (I trimestre) y abril (II) usan el mismo valor pactado: Q 0.90.
     const contenido = Buffer.from(
       [
         'Planta,Tipo,Anio,Mes,Generacion,Comentarios',
@@ -327,8 +337,8 @@ describe('Recorrido completo de punta a punta', () => {
       .expect(200);
 
     expect(Number(resumen.body.datos.kwh)).toBe(19500);
-    // I trimestre 10000 x 0.90 + II trimestre 9500 x 0.95 = 9000 + 9025 = 18025
-    expect(Number(resumen.body.datos.valor_q)).toBe(18025);
+    // Valor pactado fijo: (10000 + 9500) x 0.90 = 17550
+    expect(Number(resumen.body.datos.valor_q)).toBe(17550);
     expect(resumen.body.datos.coberturaTarifaria.completa).toBe(true);
   });
 
@@ -361,7 +371,7 @@ describe('Recorrido completo de punta a punta', () => {
       .get(`/api/production/summary?desde=2026-01-01&hasta=2026-04-30&id_proyecto=${idProyectoPpa}`)
       .expect(200);
 
-    // I trimestre (400 + 450) x 1.2 + II trimestre 380 x 1.5 = 1020 + 570 = 1590
+    // I trimestre (nov-ene) (400 + 450) x 1.2 + II (feb-abr) 380 x 1.5 = 1020 + 570 = 1590
     expect(Number(resumen.body.datos.kwh)).toBe(1230);
     expect(Number(resumen.body.datos.valor_q)).toBe(1590);
   });

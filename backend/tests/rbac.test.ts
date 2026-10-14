@@ -71,7 +71,10 @@ describe('Control de acceso basado en roles', () => {
   });
 
   it('el usuario gerencial es estrictamente de solo lectura', () => {
-    const escritura = gerencial.usuario.permisos.filter((p) => !p.endsWith('.ver') && !p.startsWith('reportes.'));
+    // Unica excepcion: el boton "Sincronizar ahora", que solo refresca datos del fabricante.
+    const escritura = gerencial.usuario.permisos.filter(
+      (p) => !p.endsWith('.ver') && !p.startsWith('reportes.') && p !== 'produccion.sincronizar_ahora',
+    );
     expect(escritura).toEqual([]);
   });
 

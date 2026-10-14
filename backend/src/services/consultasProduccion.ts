@@ -1,6 +1,6 @@
 import { query, queryOne } from '../db/pool';
 import { redondear, porcentajeCumplimiento, variacionPorcentual } from '../utils/numeros';
-import { MESES_ES } from '../utils/fechas';
+import { MESES_ES, hoyISO, periodoTarifario } from '../utils/fechas';
 
 /**
  * Consultas agregadas de produccion.
@@ -31,7 +31,11 @@ interface Fragmento {
   params: unknown[];
 }
 
-const CTE_NIVELES = `
+function cteNiveles(): string {
+  const hoy = hoyISO();
+  const periodoHoy = Number(hoy.slice(0, 4)) * 100 + Number(hoy.slice(5, 7));
+  const diaHoy = Number(hoy.slice(8, 10));
+  return `
 WITH niveles_grupo AS (
   -- Dentro de CADA grupo y para CADA FECHA: se sabe si hay detalle por inversor.
   --
@@ -55,13 +59,28 @@ niveles_proyecto AS (
    GROUP BY id_proyecto, fecha
 ),
 granularidades AS (
-  -- Para cada equipo o grupo: se sabe si hay lecturas diarias en el mes.
+  -- Para cada equipo o grupo y mes se decide UNA sola fuente de energia:
+  --   * si solo hay lecturas diarias, o solo mensual, se usa la que existe;
+  --   * si hay ambas, se usa la DIARIA solo cuando cubre el mes completo
+  --     (o hasta ayer en el mes en curso). Si la diaria es parcial, la cifra
+  --     MENSUAL es la total del mes y la diaria parcial no se suma encima.
+  -- Antes, cualquier dia sincronizado descartaba la cifra mensual y el mes
+  -- quedaba con solo esos dias.
   SELECT id_proyecto, grupo_key, inversor_key, anio, mes,
-         MAX(granularidad = 'DIARIA') AS tiene_diaria
+         CASE
+           WHEN COUNT(DISTINCT CASE WHEN granularidad = 'DIARIA' THEN fecha END) = 0 THEN 0
+           WHEN MAX(granularidad = 'MENSUAL') = 0 THEN 1
+           WHEN COUNT(DISTINCT CASE WHEN granularidad = 'DIARIA' THEN fecha END) >=
+                (CASE WHEN anio * 100 + mes < ${periodoHoy}
+                      THEN DAY(LAST_DAY(MAKEDATE(anio, 1) + INTERVAL (mes - 1) MONTH))
+                      ELSE GREATEST(1, ${diaHoy} - 1) END) THEN 1
+           ELSE 0
+         END AS usar_diaria
     FROM produccion
    WHERE activo = 1
    GROUP BY id_proyecto, grupo_key, inversor_key, anio, mes
 )`;
+}
 
 /**
  * Condicion que descarta el nivel de detalle redundante.
@@ -86,13 +105,13 @@ const SIN_DOBLE_CONTEO = `
   )`;
 
 /**
- * Condicion equivalente para la granularidad: si un equipo o grupo tiene
- * lecturas DIARIAS en un mes, el cierre MENSUAL de ese mismo mes no se suma
- * (seria el mismo dato agregado dos veces).
+ * Condicion equivalente para la granularidad: el mismo mes puede venir como
+ * lecturas DIARIAS y como cifra MENSUAL; nunca se suman ambas. Gana la diaria
+ * solo cuando cubre el mes (ver `granularidades`); si es parcial, gana la mensual.
  */
 const SIN_MEZCLA_GRANULARIDAD = `
-  ((g.tiene_diaria = 1 AND p.granularidad = 'DIARIA')
-    OR (g.tiene_diaria = 0 AND p.granularidad = 'MENSUAL'))`;
+  ((g.usar_diaria = 1 AND p.granularidad = 'DIARIA')
+    OR (g.usar_diaria = 0 AND p.granularidad = 'MENSUAL'))`;
 
 const JOIN_BASE = `
   FROM produccion p
@@ -158,7 +177,7 @@ export async function resumen(f: FiltrosProduccion): Promise<ResumenProduccion> 
     primera: string | null;
     ultima: string | null;
   }>(
-    `${CTE_NIVELES}
+    `${cteNiveles()}
      SELECT COALESCE(SUM(p.kwh), 0) AS kwh,
             COALESCE(SUM(p.valor_q), 0) AS valor_q,
             COUNT(*) AS registros,
@@ -205,7 +224,7 @@ export async function serieTemporal(
         : 'DATE_FORMAT(p.fecha, "%Y")';
 
   const filas = await query<{ periodo: string; kwh: number; valor_q: number; pendientes: number }>(
-    `${CTE_NIVELES}
+    `${cteNiveles()}
      SELECT ${expresion} AS periodo,
             COALESCE(SUM(p.kwh), 0) AS kwh,
             COALESCE(SUM(p.valor_q), 0) AS valor_q,
@@ -251,7 +270,7 @@ export interface AgrupacionProyecto {
 export async function porProyecto(f: FiltrosProduccion): Promise<AgrupacionProyecto[]> {
   const { donde, params } = construirFiltros(f);
   const filas = await query<AgrupacionProyecto>(
-    `${CTE_NIVELES}
+    `${cteNiveles()}
      SELECT p.id_proyecto, pr.nombre AS proyecto, c.nombre AS cliente, pr.tipo_proyecto,
             COALESCE(SUM(p.kwh), 0) AS kwh,
             COALESCE(SUM(p.valor_q), 0) AS valor_q,
@@ -289,7 +308,7 @@ export interface AgrupacionInversor {
 export async function porInversor(f: FiltrosProduccion): Promise<AgrupacionInversor[]> {
   const { donde, params } = construirFiltros(f, false);
   const filas = await query<AgrupacionInversor>(
-    `${CTE_NIVELES}
+    `${cteNiveles()}
      SELECT p.id_inversor,
             CONCAT(i.marca, ' ', i.modelo, COALESCE(CONCAT(' (', i.serial_externo, ')'), '')) AS inversor,
             pr.nombre AS proyecto, i.capacidad_kwp,
@@ -417,7 +436,7 @@ export async function resumenAnual(
     pendientes: number;
     comentarios: string | null;
   }>(
-    `${CTE_NIVELES}
+    `${cteNiveles()}
      SELECT p.anio, p.mes,
             COALESCE(SUM(p.kwh), 0) AS kwh,
             COALESCE(SUM(p.valor_q), 0) AS valor_q,
@@ -452,26 +471,29 @@ export async function resumenAnual(
         idCliente ? [anio, idCliente] : [anio],
       );
 
-  // La tarifa es trimestral: cada mes muestra la del trimestre al que pertenece.
+  // La tarifa es trimestral (Nov-Ene, Feb-Abr, May-Jul, Ago-Oct): cada mes
+  // muestra la de su periodo tarifario. Enero pertenece al anio tarifario
+  // anterior, por eso se consultan ambos.
   const tarifas = idProyecto
-    ? await query<{ trimestre: number; costo_kwh: number; estado: string }>(
-        `SELECT trimestre, costo_kwh, estado FROM tarifas_kwh
-          WHERE id_proyecto = ? AND anio = ? AND estado <> 'ANULADA'`,
-        [idProyecto, anio],
+    ? await query<{ anio: number; trimestre: number; costo_kwh: number; estado: string }>(
+        `SELECT anio, trimestre, costo_kwh, estado FROM tarifas_kwh
+          WHERE id_proyecto = ? AND anio IN (?, ?) AND estado <> 'ANULADA'`,
+        [idProyecto, anio, anio - 1],
       )
     : [];
 
   const mapaProd = new Map(produccion.map((p) => [`${p.anio}-${p.mes}`, p]));
   const mapaProy = new Map(proyecciones.map((p) => [p.mes, Number(p.proyeccion_kwh)]));
-  const mapaTar = new Map(tarifas.map((t) => [t.trimestre, t]));
+  const mapaTar = new Map(tarifas.map((t) => [`${t.anio}-${t.trimestre}`, t]));
 
   const filas: FilaResumenAnual[] = Array.from({ length: 12 }, (_, i) => {
     const mes = i + 1;
     const actual = mapaProd.get(`${anio}-${mes}`);
     const previo = mapaProd.get(`${anio - 1}-${mes}`);
     const proyeccion = mapaProy.get(mes) ?? null;
-    const trimestre = Math.ceil(mes / 3);
-    const tarifa = mapaTar.get(trimestre) ?? null;
+    const periodo = periodoTarifario(anio, mes);
+    const trimestre = periodo.trimestre;
+    const tarifa = mapaTar.get(`${periodo.anio}-${periodo.trimestre}`) ?? null;
     const genActual = redondear(Number(actual?.kwh ?? 0), 4);
     const genPrevio = redondear(Number(previo?.kwh ?? 0), 4);
     const pendiente = Number(actual?.pendientes ?? 0) > 0;
@@ -595,7 +617,7 @@ export interface AgrupacionGrupo {
 export async function porGrupo(f: FiltrosProduccion): Promise<AgrupacionGrupo[]> {
   const { donde, params } = construirFiltros(f);
   const filas = await query<AgrupacionGrupo>(
-    `${CTE_NIVELES}
+    `${cteNiveles()}
      SELECT p.id_grupo, gr.nombre AS grupo, pr.nombre AS proyecto,
             gr.tiene_banco_baterias, gr.capacidad_kwp,
             gr.cantidad_inversores_declarada,

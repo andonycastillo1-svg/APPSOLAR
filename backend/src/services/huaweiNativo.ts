@@ -54,6 +54,34 @@ const dormir = (ms: number) => new Promise((resolver) => setTimeout(resolver, ms
 
 interface Sesion {
   token: string | null;
+  /** Se invoca al obtener un token nuevo, para reutilizarlo en las siguientes sincronizaciones. */
+  alRenovar?: (token: string) => void;
+}
+
+/**
+ * Cada llamada a Huawei cuenta contra el cupo de la cuenta. Para gastar lo
+ * minimo se reutilizan, entre sincronizaciones de un mismo proceso, el token de
+ * sesion y la relacion serial -> dispositivo (que casi nunca cambia).
+ */
+interface CacheCuenta {
+  token: string | null;
+  tokenEn: number;
+  dispositivosEn: number;
+  idPorSerial: Map<string, string>;
+  tipoPorId: Map<string, number>;
+  estacionPorSerial: Map<string, string>;
+}
+const cachePorCuenta = new Map<string, CacheCuenta>();
+const VIDA_TOKEN_MS = 20 * 60 * 1000;
+const VIDA_DISPOSITIVOS_MS = 6 * 60 * 60 * 1000;
+/** Pausa entre consultas de produccion seguidas: evita el rechazo por frecuencia. */
+const PAUSA_ENTRE_CONSULTAS_MS = 1200;
+/** Codigo de Huawei: limite DIARIO agotado. Reintentar de inmediato no sirve. */
+const LIMITE_DIARIO = 20618;
+
+/** Descarta el token y los dispositivos guardados (p. ej. al cambiar credenciales). */
+export function olvidarCacheHuawei(): void {
+  cachePorCuenta.clear();
 }
 
 interface Respuesta {
@@ -133,6 +161,7 @@ async function autenticar(cfg: ConfiguracionAdaptador, sesion: Sesion): Promise<
     );
   }
   sesion.token = r.token;
+  sesion.alRenovar?.(r.token);
 }
 
 async function peticion(
@@ -172,7 +201,11 @@ async function peticion(
       await autenticar(cfg, sesion);
       continue;
     }
-    if (fallo.codigo === 'LIMITE_API' && intento < cfg.max_reintentos) {
+    if (
+      fallo.codigo === 'LIMITE_API' &&
+      Number(fallo.detalle.codigoFabricante) !== LIMITE_DIARIO &&
+      intento < cfg.max_reintentos
+    ) {
       ultimo = fallo;
       await dormir((Math.min(2 ** intento, 8) + 1) * 1000);
       continue;
@@ -286,12 +319,43 @@ export async function obtenerProduccionNativo(
   const registros: RegistroCanonico[] = [];
   const advertencias: string[] = [];
   const estacionesResueltas: Record<string, string> = {};
-  const sesion: Sesion = { token: null };
-  await autenticar(cfg, sesion);
+  const claveCuenta = `${cfg.endpoint}|${env.huawei.username}`;
+  let cache = cachePorCuenta.get(claveCuenta);
+  if (!cache) {
+    cache = {
+      token: null,
+      tokenEn: 0,
+      dispositivosEn: 0,
+      idPorSerial: new Map(),
+      tipoPorId: new Map(),
+      estacionPorSerial: new Map(),
+    };
+    cachePorCuenta.set(claveCuenta, cache);
+  }
+  const cuenta = cache;
+  if (Date.now() - cuenta.dispositivosEn > VIDA_DISPOSITIVOS_MS) {
+    cuenta.idPorSerial.clear();
+    cuenta.tipoPorId.clear();
+    cuenta.estacionPorSerial.clear();
+    cuenta.dispositivosEn = Date.now();
+  }
+
+  const sesion: Sesion = {
+    token: null,
+    alRenovar: (token) => {
+      cuenta.token = token;
+      cuenta.tokenEn = Date.now();
+    },
+  };
+  if (cuenta.token && Date.now() - cuenta.tokenEn < VIDA_TOKEN_MS) {
+    sesion.token = cuenta.token;
+  } else {
+    await autenticar(cfg, sesion);
+  }
 
   // serial (minusculas) -> id de dispositivo; devTypeId: 1 string, 38 residencial.
-  const idPorSerial = new Map<string, string>();
-  const tipoPorId = new Map<string, number>();
+  const idPorSerial = cuenta.idPorSerial;
+  const tipoPorId = cuenta.tipoPorId;
 
   const cargarDispositivos = async (codigos: string[]) => {
     for (let i = 0; i < codigos.length; i += 100) {
@@ -303,15 +367,21 @@ export async function obtenerProduccionNativo(
         const id = String(d.id);
         idPorSerial.set(sn.toLowerCase(), id);
         tipoPorId.set(id, Number(d.devTypeId) || 1);
-        if (d.stationCode) estacionesResueltas[sn.toLowerCase()] = String(d.stationCode);
+        if (d.stationCode) {
+          estacionesResueltas[sn.toLowerCase()] = String(d.stationCode);
+          cuenta.estacionPorSerial.set(sn.toLowerCase(), String(d.stationCode));
+        }
       }
     }
   };
 
-  const declaradas = p.estaciones ?? [];
-  if (declaradas.length > 0) await cargarDispositivos(declaradas);
+  const faltanSeriales = () => p.seriales.some((s) => !idPorSerial.has(s.toLowerCase()));
 
-  if (p.seriales.some((s) => !idPorSerial.has(s.toLowerCase()))) {
+  // Solo se consulta la lista de dispositivos cuando falta alguno por conocer.
+  const declaradas = p.estaciones ?? [];
+  if (declaradas.length > 0 && faltanSeriales()) await cargarDispositivos(declaradas);
+
+  if (faltanSeriales()) {
     const lista = await peticion(cfg, sesion, '/getStationList', {});
     const yaConsultadas = new Set(declaradas);
     const codigos = ((lista.data as Array<Record<string, any>> | undefined) ?? [])
@@ -321,6 +391,10 @@ export async function obtenerProduccionNativo(
   }
 
   const pedidos = new Set(p.seriales.map((s) => s.toLowerCase()));
+  for (const clave of pedidos) {
+    const estacion = cuenta.estacionPorSerial.get(clave);
+    if (estacion) estacionesResueltas[clave] = estacion;
+  }
   for (const clave of Object.keys(estacionesResueltas)) {
     if (!pedidos.has(clave)) delete estacionesResueltas[clave];
   }
@@ -336,6 +410,7 @@ export async function obtenerProduccionNativo(
     const serialOriginal = new Map(p.seriales.map((s) => [s.toLowerCase(), s]));
     const inicioRango = p.granularidad === 'DIARIA' ? p.desde : `${p.desde.slice(0, 8)}01`;
     const vistos = new Set<string>();
+    let consultasHechas = 0;
     const ruta = p.granularidad === 'DIARIA' ? '/getDevKpiDay' : '/getDevKpiMonth';
 
     // Huawei devuelve el mes completo (diario) o el año completo (mensual).
@@ -354,6 +429,8 @@ export async function obtenerProduccionNativo(
       const filas: Array<Record<string, any>> = [];
       for (const tipo of [...new Set(ids.map((i) => tipoPorId.get(i) ?? 1))].sort((a, b) => a - b)) {
         const idsTipo = ids.filter((i) => (tipoPorId.get(i) ?? 1) === tipo);
+        if (consultasHechas > 0) await dormir(PAUSA_ENTRE_CONSULTAS_MS);
+        consultasHechas += 1;
         const cuerpo = await peticion(cfg, sesion, ruta, {
           devIds: idsTipo.join(','),
           devTypeId: tipo,

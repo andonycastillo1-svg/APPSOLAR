@@ -18,7 +18,7 @@ import { requiereAutenticacion, requierePermiso } from '../../middleware/autenti
 import { PERMISOS } from '../../config/permisos';
 import { auditarDesdeRequest } from '../../services/auditoria';
 import { probarConexion } from '../../services/huaweiCliente';
-import { ejecutarSincronizacion } from '../../services/sincronizacion';
+import { ejecutarSincronizacion, ejecutarSincronizacionAhora } from '../../services/sincronizacion';
 import { hoyISO } from '../../utils/fechas';
 
 export const huaweiRouter = Router();
@@ -272,6 +272,30 @@ huaweiRouter.post(
       hasta: datos.hasta,
       granularidad: datos.granularidad,
       tipo: 'MANUAL',
+      idUsuario: req.usuario!.id_usuario,
+      emailUsuario: req.usuario!.email,
+    });
+
+    ok(res, {
+      ...resultado,
+      esSimulado: resultado.modo === 'MOCK',
+      etiquetaOrigen:
+        resultado.modo === 'MOCK'
+          ? 'DATOS SIMULADOS (modo sandbox): no provienen de la plataforma real del fabricante.'
+          : 'Datos obtenidos de Huawei SmartPVMS.',
+    });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// POST /integrations/huawei/sync-now
+// Boton "Sincronizar ahora": sin fechas, trae todo hasta este momento.
+// ---------------------------------------------------------------------------
+huaweiRouter.post(
+  '/sync-now',
+  requierePermiso(PERMISOS.PRODUCCION_SINCRONIZAR_AHORA),
+  asyncHandler(async (req, res) => {
+    const resultado = await ejecutarSincronizacionAhora({
       idUsuario: req.usuario!.id_usuario,
       emailUsuario: req.usuario!.email,
     });

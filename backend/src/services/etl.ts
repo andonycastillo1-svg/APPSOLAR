@@ -10,7 +10,9 @@ import { errores } from '../utils/errors';
  * Soporta dos formatos de plantilla:
  *  1. NORMALIZADO      -> fecha, kwh, inversor_serial, comentarios
  *  2. HISTORICO_EXCEL  -> Planta, Tipo, Año, Mes, Generacion, Comentarios
- *                          (+ Inversor/Serial opcional)
+ *                          (+ Grupo e Inversor/Serial opcionales). Con Grupo e Inversor
+ *                          el mismo archivo carga una PLANTA COMPLETA separada por
+ *                          mes, grupo e inversor.
  *
  * El resultado es un conjunto de filas canonicas mas la lista de errores y
  * advertencias por fila, que alimenta la previsualizacion del asistente.
@@ -37,6 +39,8 @@ export interface FilaCanonica {
   granularidad: 'DIARIA' | 'MENSUAL';
   kwh: number;
   serial: string | null;
+  /** Nombre del grupo (solo formato historico con columna Grupo). */
+  grupo: string | null;
   comentarios: string | null;
 }
 
@@ -105,6 +109,9 @@ const ALIAS_HISTORICO: Record<string, string> = {
   inversor: 'serial',
   serial: 'serial',
   inversor_serial: 'serial',
+  numero_serie: 'serial',
+  grupo: 'grupo',
+  nombre_grupo: 'grupo',
 };
 
 /** Determina el formato del archivo a partir de sus encabezados. */
@@ -335,6 +342,7 @@ export async function leerArchivo(
       const generacionBruta = leerCampo(fila.valores, 'generacion');
       const comentarios = textoDe(leerCampo(fila.valores, 'comentarios'));
       const serial = textoDe(leerCampo(fila.valores, 'serial')) ?? opciones.serialUnico ?? null;
+      const grupo = textoDe(leerCampo(fila.valores, 'grupo'));
 
       if (!planta) {
         errar('Planta', anioBruto, 'PLANTA_VACIA', 'La columna Planta es obligatoria.');
@@ -357,6 +365,10 @@ export async function leerArchivo(
         );
         continue;
       }
+
+      // Plantilla de planta completa: una celda de generacion vacia significa
+      // "sin dato" para ese equipo y mes; no es un error ni se carga como cero.
+      if (String(generacionBruta ?? '').trim() === '') continue;
 
       const generacion = parsearNumero(generacionBruta);
       if (generacion === null) {
@@ -395,6 +407,7 @@ export async function leerArchivo(
         granularidad: 'MENSUAL',
         kwh: redondearKwh(generacion),
         serial,
+        grupo,
         comentarios,
       });
       continue;
@@ -441,8 +454,34 @@ export async function leerArchivo(
       granularidad: 'DIARIA',
       kwh: redondearKwh(kwh),
       serial,
+      grupo: null,
       comentarios,
     });
+  }
+
+  // El mismo equipo (o grupo) no puede venir dos veces para el mismo periodo:
+  // la segunda fila pisaria a la primera y el total quedaria mal. Se rechaza.
+  if (formato === 'HISTORICO_EXCEL') {
+    const vistos = new Set<string>();
+    for (let i = 0; i < canonicas.length; i += 1) {
+      const f = canonicas[i];
+      if (!f.serial && !f.grupo) continue;
+      const clave = `${(f.planta ?? '').toLowerCase()}|${(f.grupo ?? '').toLowerCase()}|${(f.serial ?? '').toLowerCase()}|${f.anio}|${f.mes}`;
+      if (vistos.has(clave)) {
+        problemas.push({
+          fila: f.fila,
+          columna: 'Inversor',
+          valor: f.serial ?? f.grupo,
+          codigo: 'FILA_REPETIDA',
+          severidad: 'ERROR',
+          mensaje: `Esta combinacion de planta, grupo, inversor y mes ya aparece antes en el archivo (${MESES_ES[f.mes - 1]} ${f.anio}). Se descarta para no duplicar la energia.`,
+        });
+        canonicas.splice(i, 1);
+        i -= 1;
+      } else {
+        vistos.add(clave);
+      }
+    }
   }
 
   return {
@@ -467,6 +506,7 @@ export interface GrupoPeriodo {
   filas: FilaCanonica[];
   kwhTotal: number;
   tieneSerial: boolean;
+  tieneGrupo: boolean;
   requiereDecision: boolean;
 }
 
@@ -490,6 +530,7 @@ export function agruparPorPeriodo(filas: FilaCanonica[]): GrupoPeriodo[] {
         filas: [],
         kwhTotal: 0,
         tieneSerial: false,
+        tieneGrupo: false,
         requiereDecision: false,
       };
       mapa.set(clave, grupo);
@@ -497,10 +538,21 @@ export function agruparPorPeriodo(filas: FilaCanonica[]): GrupoPeriodo[] {
     grupo.filas.push(fila);
     grupo.kwhTotal = redondearKwh(grupo.kwhTotal + fila.kwh);
     if (fila.serial) grupo.tieneSerial = true;
+    if (fila.grupo) grupo.tieneGrupo = true;
   }
 
+  // Hay que decidir solo cuando dos filas apuntan al MISMO destino (mismo grupo
+  // y mismo inversor, o ambos vacios) sin que se pueda distinguirlas. Filas de
+  // grupos o equipos distintos son legitimas y se cargan tal cual.
   for (const grupo of mapa.values()) {
-    grupo.requiereDecision = grupo.filas.length > 1 && !grupo.tieneSerial;
+    const cuenta = new Map<string, number>();
+    for (const fila of grupo.filas) {
+      if (fila.serial) continue;
+      const k = (fila.grupo ?? '').toLowerCase();
+      cuenta.set(k, (cuenta.get(k) ?? 0) + 1);
+    }
+    const hayRepetidas = [...cuenta.values()].some((n) => n > 1);
+    grupo.requiereDecision = grupo.tieneSerial || grupo.tieneGrupo ? hayRepetidas : grupo.filas.length > 1;
   }
 
   return [...mapa.values()].sort(
@@ -624,4 +676,109 @@ export function plantillaConErroresCsv(): string {
     'Planta Demo Norte,PPA,2025,Agosto,12000,Fila valida',
     'Planta Demo Norte,PPA,2025,Agosto,3000,Segunda fila del mismo mes (requiere decision)',
   ].join('\r\n');
+}
+
+// ---------------------------------------------------------------------------
+// Plantilla de PLANTA COMPLETA (separada por mes, grupo e inversor)
+// ---------------------------------------------------------------------------
+
+export interface EstructuraPlanta {
+  planta: string;
+  anio: number;
+  /** Ultimo mes a incluir (12 salvo el anio en curso). */
+  hastaMes: number;
+  grupos: Array<{
+    nombre: string;
+    inversores: Array<{ serial: string; equipo: string }>;
+  }>;
+}
+
+/**
+ * Plantilla ya rellenada con la estructura real de la planta: una fila por
+ * mes y por inversor de cada grupo. Solo falta escribir los kWh. Un grupo sin
+ * inversores registrados con serial recibe una fila por mes a nivel de grupo.
+ * Las celdas de generacion vacias se ignoran al importar.
+ */
+export async function plantillaPlantaCompletaXlsx(estructura: EstructuraPlanta): Promise<Buffer> {
+  const libro = new ExcelJS.Workbook();
+  libro.creator = 'Sistema de Monitoreo Energetico - Retse, S.A.';
+  libro.created = new Date();
+
+  const hoja = libro.addWorksheet('Produccion');
+  hoja.columns = [
+    { header: 'Planta', key: 'planta', width: 28 },
+    { header: 'Grupo', key: 'grupo', width: 24 },
+    { header: 'Inversor', key: 'serial', width: 24 },
+    { header: 'Año', key: 'anio', width: 8 },
+    { header: 'Mes', key: 'mes', width: 12 },
+    { header: 'Generacion', key: 'generacion', width: 16 },
+    { header: 'Comentarios', key: 'comentarios', width: 36 },
+    { header: 'Equipo (solo referencia)', key: 'equipo', width: 30 },
+  ];
+
+  let filas = 0;
+  for (const grupo of estructura.grupos) {
+    for (let mes = 1; mes <= estructura.hastaMes; mes += 1) {
+      if (grupo.inversores.length === 0) {
+        hoja.addRow({
+          planta: estructura.planta,
+          grupo: grupo.nombre,
+          serial: '',
+          anio: estructura.anio,
+          mes: MESES_ES[mes - 1],
+          generacion: null,
+          comentarios: '',
+          equipo: '(consolidado del grupo)',
+        });
+        filas += 1;
+        continue;
+      }
+      for (const inversor of grupo.inversores) {
+        hoja.addRow({
+          planta: estructura.planta,
+          grupo: grupo.nombre,
+          serial: inversor.serial,
+          anio: estructura.anio,
+          mes: MESES_ES[mes - 1],
+          generacion: null,
+          comentarios: '',
+          equipo: inversor.equipo,
+        });
+        filas += 1;
+      }
+    }
+  }
+
+  hoja.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  hoja.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B3C5D' } };
+  hoja.views = [{ state: 'frozen', ySplit: 1 }];
+  // Columna de generacion resaltada: es la unica que se debe llenar.
+  for (let fila = 2; fila <= filas + 1; fila += 1) {
+    hoja.getCell(`F${fila}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
+    hoja.getCell(`F${fila}`).numFmt = '#,##0.0000';
+  }
+
+  const instrucciones = libro.addWorksheet('Instrucciones');
+  instrucciones.columns = [{ width: 110 }];
+  [
+    `PLANTILLA DE PLANTA COMPLETA — ${estructura.planta} — ${estructura.anio}`,
+    '',
+    'Esta plantilla ya trae una fila por mes y por inversor de cada grupo. Solo escriba la energia en la columna Generacion (celdas amarillas).',
+    '',
+    'Planta       No la modifique: debe coincidir con el proyecto registrado.',
+    'Grupo        No lo modifique: debe coincidir con un grupo de la planta.',
+    'Inversor     Numero de serie registrado. Vacio solo en los grupos sin inversores (consolidado del grupo).',
+    'Año / Mes    Periodo de la fila. Mes en español (Enero..Diciembre) o numero de 1 a 12.',
+    'Generacion   Energia del mes en kWh (no kWp). Punto o coma decimal. No negativa. Si no tiene dato, deje la celda vacia.',
+    'Comentarios  Opcional.',
+    '',
+    'Reglas:',
+    '- No repita la misma combinacion de grupo, inversor y mes: la segunda fila se descarta.',
+    '- Si un inversor ya fue sincronizado desde Huawei en ese mes, la fila se omite para no duplicar la energia.',
+    '- No incluya formulas ni macros; el sistema toma el resultado de la celda.',
+    '- Puede eliminar las filas que no vaya a cargar.',
+  ].forEach((linea) => instrucciones.addRow([linea]));
+  instrucciones.getRow(1).font = { bold: true, size: 13 };
+
+  return Buffer.from(await libro.xlsx.writeBuffer());
 }

@@ -11,6 +11,7 @@ import {
   analizarImpacto,
   exigirMesAbierto,
   exigirTrimestreAbierto,
+  materializarTarifaPactada,
   mesesCerradosDelTrimestre,
   recalcularPendientes,
   recalcularPorTarifa,
@@ -23,14 +24,21 @@ import {
   etiquetaTrimestre,
   mesesDelTrimestre,
   nombreMesesTrimestre,
+  periodoTarifario,
+  sqlAnioTarifario,
+  sqlTrimestre,
+  trimestreActual,
   trimestreSiguiente,
 } from '../../utils/fechas';
 
 /**
  * Submodulo "Tarifas de energia" de cada proyecto.
  *
- * La tarifa del kWh tiene vigencia TRIMESTRAL sobre trimestres calendario
- * (Ene-Mar, Abr-Jun, Jul-Sep, Oct-Dic) y debe actualizarse cada trimestre.
+ * La tarifa del kWh tiene vigencia TRIMESTRAL sobre trimestres tarifarios que
+ * inician en noviembre (Nov-Ene, Feb-Abr, May-Jul, Ago-Oct). El `anio` de una
+ * tarifa es el anio tarifario: el anio calendario en que inicia noviembre.
+ * Las tarifas de DISTRIBUIDORA deben actualizarse cada trimestre; las de
+ * COMERCIALIZADORA usan el valor pactado del proyecto y no se renuevan.
  * El sistema avisa cuando el trimestre en curso no tiene tarifa aprobada y
  * cuando se acerca el cambio de trimestre sin la siguiente registrada.
  *
@@ -79,6 +87,28 @@ const esquemaReapertura = esquemaCierre.extend({
   motivo: z.string().trim().min(10, 'Indique el motivo de la reapertura (minimo 10 caracteres).').max(500),
 });
 
+function rechazarPactada(tarifa: { origen?: string }): void {
+  if (tarifa.origen === 'PACTADA') {
+    throw errores.reglaNegocio(
+      'Esta tarifa proviene del valor pactado del proyecto. Para cambiarla edite el valor pactado en la ficha del proyecto.',
+    );
+  }
+}
+
+/** Las tarifas de comercializadora salen del valor pactado, no se capturan aqui. */
+async function exigirTarifaManual(idProyecto: number): Promise<void> {
+  const p = await queryOne<{ suministradora: string | null; valor_pactado_kwh: number | null }>(
+    'SELECT suministradora, valor_pactado_kwh FROM proyectos WHERE id_proyecto = ?',
+    [idProyecto],
+  );
+  if (p?.suministradora === 'COMERCIALIZADORA' && p.valor_pactado_kwh !== null) {
+    throw errores.reglaNegocio(
+      'Este proyecto es de comercializadora: su tarifa es el valor pactado y no se renueva por trimestre. ' +
+        'Para cambiarlo edite el valor pactado en la ficha del proyecto.',
+    );
+  }
+}
+
 async function proyectoDe(req: { params: Record<string, string> }): Promise<number> {
   const id = Number(req.params.projectId);
   if (!Number.isInteger(id) || id <= 0) throw errores.solicitudInvalida('Proyecto invalido.');
@@ -96,7 +126,11 @@ tarifasRouter.get(
   validarConsulta(z.object({ anio: z.coerce.number().int().min(2000).max(2100).optional() })),
   asyncHandler(async (req, res) => {
     const idProyecto = await proyectoDe(req);
-    const { anio = anioActual() } = consulta<{ anio?: number }>(req);
+    // El anio es el TARIFARIO (nov a oct): por omision, el que esta en curso.
+    const { anio = trimestreActual().anio } = consulta<{ anio?: number }>(req);
+
+    // Comercializadora: el valor pactado rige los cuatro trimestres.
+    for (const t of [1, 2, 3, 4]) await materializarTarifaPactada(idProyecto, anio, t);
 
     const tarifas = await query<{
       id_tarifa: number;
@@ -123,7 +157,8 @@ tarifasRouter.get(
     );
 
     const cierres = await query<{ mes: number; estado: string }>(
-      'SELECT mes, estado FROM cierres_mensuales WHERE id_proyecto = ? AND anio = ?',
+      `SELECT mes, estado FROM cierres_mensuales
+        WHERE id_proyecto = ? AND ${sqlAnioTarifario('anio', 'mes')} = ?`,
       [idProyecto, anio],
     );
 
@@ -135,11 +170,12 @@ tarifasRouter.get(
       pendientes: number;
       kwh: number;
     }>(
-      `SELECT CEIL(mes / 3) AS trimestre, COUNT(*) AS registros,
+      `SELECT ${sqlTrimestre('mes')} AS trimestre, COUNT(*) AS registros,
               SUM(estado_valorizacion = 'PENDIENTE_DE_TARIFA') AS pendientes,
               COALESCE(SUM(kwh), 0) AS kwh
-         FROM produccion WHERE id_proyecto = ? AND anio = ? AND activo = 1
-        GROUP BY CEIL(mes / 3)`,
+         FROM produccion
+        WHERE id_proyecto = ? AND ${sqlAnioTarifario('anio', 'mes')} = ? AND activo = 1
+        GROUP BY ${sqlTrimestre('mes')}`,
       [idProyecto, anio],
     );
 
@@ -180,6 +216,7 @@ tarifasRouter.get(
       anio,
       id_proyecto: idProyecto,
       periodicidad: 'TRIMESTRAL',
+      etiquetaAnio: `Anio tarifario ${anio} (nov ${anio} a oct ${anio + 1})`,
       calendario,
       alerta,
       resumen: {
@@ -215,6 +252,7 @@ tarifasRouter.post(
   asyncHandler(async (req, res) => {
     const idProyecto = await proyectoDe(req);
     const datos = req.body as z.infer<typeof esquemaCrear>;
+    await exigirTarifaManual(idProyecto);
 
     await exigirTrimestreAbierto(idProyecto, datos.anio, datos.trimestre);
 
@@ -293,6 +331,7 @@ tarifasRouter.post(
   asyncHandler(async (req, res) => {
     const idProyecto = await proyectoDe(req);
     const { anio, trimestre } = req.body as z.infer<typeof esquemaCopia>;
+    await exigirTarifaManual(idProyecto);
     await exigirTrimestreAbierto(idProyecto, anio, trimestre);
 
     const anioAnterior = trimestre === 1 ? anio - 1 : anio;
@@ -363,11 +402,13 @@ tarifasRouter.put(
     const tarifa = await queryOne<{
       id_tarifa: number;
       estado: string;
+      origen?: string;
       anio: number;
       trimestre: number;
       costo_kwh: number;
     }>('SELECT * FROM tarifas_kwh WHERE id_tarifa = ? AND id_proyecto = ?', [idTarifa, idProyecto]);
     if (!tarifa) throw errores.noEncontrado('la tarifa indicada');
+    rechazarPactada(tarifa);
 
     if (tarifa.estado !== 'BORRADOR') {
       throw errores.reglaNegocio(
@@ -488,11 +529,12 @@ tarifasRouter.post(
     const idTarifa = Number(req.params.rateId);
     const datos = req.body as z.infer<typeof esquemaRecalculo>;
 
-    const tarifa = await queryOne<{ estado: string; anio: number; trimestre: number; costo_kwh: number }>(
+    const tarifa = await queryOne<{ estado: string; origen?: string; anio: number; trimestre: number; costo_kwh: number }>(
       'SELECT * FROM tarifas_kwh WHERE id_tarifa = ? AND id_proyecto = ?',
       [idTarifa, idProyecto],
     );
     if (!tarifa) throw errores.noEncontrado('la tarifa indicada');
+    rechazarPactada(tarifa);
     if (tarifa.estado !== 'APROBADA') {
       throw errores.reglaNegocio('Solo se recalculan tarifas aprobadas. Edite el borrador directamente.');
     }
@@ -548,11 +590,12 @@ tarifasRouter.post(
     const idTarifa = Number(req.params.rateId);
     const { motivo } = req.body as { motivo: string };
 
-    const tarifa = await queryOne<{ estado: string; anio: number; trimestre: number }>(
+    const tarifa = await queryOne<{ estado: string; origen?: string; anio: number; trimestre: number }>(
       'SELECT * FROM tarifas_kwh WHERE id_tarifa = ? AND id_proyecto = ?',
       [idTarifa, idProyecto],
     );
     if (!tarifa) throw errores.noEncontrado('la tarifa indicada');
+    rechazarPactada(tarifa);
     if (tarifa.estado === 'ANULADA') throw errores.conflicto('La tarifa ya estaba anulada.');
     await exigirTrimestreAbierto(idProyecto, tarifa.anio, tarifa.trimestre);
 
@@ -618,7 +661,7 @@ tarifasRouter.post(
     if ((pendientes?.total ?? 0) > 0) {
       throw errores.reglaNegocio(
         `No se puede cerrar ${MESES_ES[mes - 1]} ${anio}: hay ${pendientes?.total} registro(s) ` +
-          `sin tarifa aprobada. Registre la tarifa del ${etiquetaTrimestre(anio, Math.ceil(mes / 3))}.`,
+          `sin tarifa aprobada. Registre la tarifa del ${etiquetaPeriodoDeMes(anio, mes)}.`,
       );
     }
 
@@ -674,6 +717,11 @@ tarifasRouter.post(
     ok(res, { mensaje: `Periodo ${MESES_ES[mes - 1]} ${anio} reabierto. Quedo registrado el motivo.` });
   }),
 );
+
+function etiquetaPeriodoDeMes(anio: number, mes: number): string {
+  const p = periodoTarifario(anio, mes);
+  return etiquetaTrimestre(p.anio, p.trimestre);
+}
 
 // Se exporta para que el modulo de proyectos pueda reutilizar la validacion.
 export { proyectoDe as proyectoDeRutaTarifas, exigirMesAbierto, trimestreSiguiente, nombreMesesTrimestre };

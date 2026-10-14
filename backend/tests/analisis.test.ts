@@ -12,19 +12,28 @@ import {
   type Sesion,
 } from './utils/entorno';
 import { porcentajeCumplimiento, variacionPorcentual } from '../src/utils/numeros';
-import { etiquetaTrimestre, trimestreDeMes, trimestresDelPeriodo } from '../src/utils/fechas';
+import {
+  etiquetaTrimestre,
+  mesesDelPeriodoTarifario,
+  periodoTarifario,
+  primerDiaTrimestre,
+  trimestreDeMes,
+  trimestresDelPeriodo,
+  ultimoDiaTrimestre,
+} from '../src/utils/fechas';
 
 /**
  * Proyecciones mensuales, agregaciones, comparaciones y reportes.
  *
  * Datos de partida:
- *   Tarifas (TRIMESTRALES)   2025 T1 = 1.00 | 2026 T1 = 2.00 | 2026 T2 = SIN TARIFA
+ *   Tarifas (TRIMESTRALES, anio tarifario nov-oct)
+ *                            2024 I = 1.00 | 2024 II = 1.00 | 2025 I = 2.00 | 2025 II = SIN TARIFA
  *   Proyeccion 2026 (mensual) enero a abril = 1000 kWh cada uno
- *   Produccion               2025-01-15  500   (T1 2025)
- *                            2025-02-15  500   (T1 2025)
- *                            2026-01-15 1200   (T1 2026)
- *                            2026-02-15  900   (T1 2026)
- *                            2026-04-15  400   (T2 2026, queda pendiente)
+ *   Produccion               2025-01-15  500   (2024 I)
+ *                            2025-02-15  500   (2024 II)
+ *                            2026-01-15 1200   (2025 I, Q 2.00)
+ *                            2026-02-15  900   (2025 II, queda pendiente)
+ *                            2026-04-15  400   (2025 II, queda pendiente)
  */
 describe('Analisis, proyecciones y reportes', () => {
   let admin: Sesion;
@@ -44,11 +53,13 @@ describe('Analisis, proyecciones y reportes', () => {
     await limpiarDatos();
     datos = await crearDatosBase();
 
-    // --- Tarifas trimestrales. El II trimestre de 2026 se deja sin tarifa
-    //     a proposito para ejercitar la valorizacion pendiente.
+    // --- Tarifas trimestrales (anio tarifario = anio en que inicia noviembre).
+    //     El II trimestre del anio tarifario 2025 (feb-abr 2026) se deja sin
+    //     tarifa a proposito para ejercitar la valorizacion pendiente.
     const tarifas: Array<[number, number, number]> = [
-      [2025, 1, 1.0],
-      [2026, 1, 2.0],
+      [2024, 1, 1.0],
+      [2024, 2, 1.0],
+      [2025, 1, 2.0],
     ];
     for (const [anio, trimestre, costo] of tarifas) {
       await comoUsuario(admin)
@@ -104,17 +115,37 @@ describe('Analisis, proyecciones y reportes', () => {
     expect(variacionPorcentual(1200, 0)).toBeNull();
   });
 
-  it('resuelve el trimestre calendario de cada mes y de cada rango', () => {
-    expect(trimestreDeMes(1)).toBe(1);
-    expect(trimestreDeMes(3)).toBe(1);
-    expect(trimestreDeMes(4)).toBe(2);
-    expect(trimestreDeMes(12)).toBe(4);
-    expect(etiquetaTrimestre(2026, 3)).toBe('III trimestre 2026');
+  it('resuelve el trimestre tarifario (inicia en noviembre) de cada mes y de cada rango', () => {
+    // I: nov-dic-ene, II: feb-mar-abr, III: may-jun-jul, IV: ago-sep-oct.
+    expect([11, 12, 1].map(trimestreDeMes)).toEqual([1, 1, 1]);
+    expect([2, 3, 4].map(trimestreDeMes)).toEqual([2, 2, 2]);
+    expect([5, 6, 7].map(trimestreDeMes)).toEqual([3, 3, 3]);
+    expect([8, 9, 10].map(trimestreDeMes)).toEqual([4, 4, 4]);
+
+    // Enero pertenece al anio tarifario que inicio en el noviembre anterior.
+    expect(periodoTarifario(2026, 1)).toEqual({ anio: 2025, trimestre: 1 });
+    expect(periodoTarifario(2025, 11)).toEqual({ anio: 2025, trimestre: 1 });
+    expect(periodoTarifario(2026, 10)).toEqual({ anio: 2025, trimestre: 4 });
+    expect(periodoTarifario(2026, 11)).toEqual({ anio: 2026, trimestre: 1 });
+
+    expect(mesesDelPeriodoTarifario(2025, 1)).toEqual([
+      { anio: 2025, mes: 11 },
+      { anio: 2025, mes: 12 },
+      { anio: 2026, mes: 1 },
+    ]);
+    expect(etiquetaTrimestre(2025, 3)).toBe('III trimestre 2025 (may 2026 a jul 2026)');
+    expect(primerDiaTrimestre(2025, 1)).toBe('2025-11-01');
+    expect(ultimoDiaTrimestre(2025, 1)).toBe('2026-01-31');
+    expect(ultimoDiaTrimestre(2025, 4)).toBe('2026-10-31');
 
     expect(trimestresDelPeriodo({ desde: '2026-02-10', hasta: '2026-07-05' })).toEqual([
+      { anio: 2025, trimestre: 2 },
+      { anio: 2025, trimestre: 3 },
+    ]);
+    // Un rango que cruza el cambio de anio tarifario.
+    expect(trimestresDelPeriodo({ desde: '2026-10-20', hasta: '2026-11-05' })).toEqual([
+      { anio: 2025, trimestre: 4 },
       { anio: 2026, trimestre: 1 },
-      { anio: 2026, trimestre: 2 },
-      { anio: 2026, trimestre: 3 },
     ]);
   });
 
@@ -220,9 +251,9 @@ describe('Analisis, proyecciones y reportes', () => {
       .get(`/api/production/summary?desde=2026-01-01&hasta=2026-02-28&id_proyecto=${datos.idProyecto}`)
       .expect(200);
 
-    // Enero y febrero caen en el I trimestre: (1200 + 900) x 2.00 = 4200
+    // Enero cae en el I trimestre (Q 2.00); febrero en el II, sin tarifa.
     expect(Number(resumen.body.datos.kwh)).toBe(2100);
-    expect(Number(resumen.body.datos.valor_q)).toBe(4200);
+    expect(Number(resumen.body.datos.valor_q)).toBe(2400);
     expect(resumen.body.datos.moneda).toBe('GTQ');
     expect(resumen.body.datos.zonaHoraria).toBe('America/Guatemala');
   });
@@ -235,11 +266,11 @@ describe('Analisis, proyecciones y reportes', () => {
     const cobertura = resumen.body.datos.coberturaTarifaria;
     expect(cobertura.completa).toBe(false);
     expect(cobertura.trimestresConTarifa).toHaveLength(1);
-    expect(cobertura.trimestresConTarifa[0].etiqueta).toBe('I trimestre 2026');
+    expect(cobertura.trimestresConTarifa[0].etiqueta).toBe('I trimestre 2025 (nov 2025 a ene 2026)');
     expect(cobertura.trimestresPendientes).toHaveLength(1);
-    expect(cobertura.trimestresPendientes[0].etiqueta).toBe('II trimestre 2026');
-    expect(cobertura.registrosPendientes).toBe(1);
-    expect(Number(cobertura.kwhPendientes)).toBe(400);
+    expect(cobertura.trimestresPendientes[0].etiqueta).toBe('II trimestre 2025 (feb 2026 a abr 2026)');
+    expect(cobertura.registrosPendientes).toBe(2);
+    expect(Number(cobertura.kwhPendientes)).toBe(1300);
   });
 
   it('compara con el periodo anterior equivalente y entre inversores', async () => {
@@ -273,11 +304,12 @@ describe('Analisis, proyecciones y reportes', () => {
     expect(Number(enero.valor_producido_q)).toBe(2400);
     expect(enero.pendiente_de_tarifa).toBe(false);
 
-    // Febrero comparte la tarifa del I trimestre con enero.
-    expect(Number(filas[1].tarifa_q_kwh)).toBe(2);
-    expect(filas[1].trimestre).toBe(1);
+    // Febrero ya pertenece al II trimestre (feb-abr), que no tiene tarifa.
+    expect(filas[1].tarifa_q_kwh).toBeNull();
+    expect(filas[1].trimestre).toBe(2);
+    expect(filas[1].pendiente_de_tarifa).toBe(true);
 
-    // Abril pertenece al II trimestre, que no tiene tarifa aprobada.
+    // Abril comparte ese II trimestre sin tarifa aprobada.
     const abril = filas[3];
     expect(abril.trimestre).toBe(2);
     expect(Number(abril.generacion_anio_seleccionado)).toBe(400);
@@ -288,8 +320,8 @@ describe('Analisis, proyecciones y reportes', () => {
     const totales = respuesta.body.datos.totales;
     expect(Number(totales.generacion_anio_seleccionado)).toBe(2500);
     expect(Number(totales.generacion_anio_anterior)).toBe(1000);
-    expect(Number(totales.valor_producido_q)).toBe(4200);
-    expect(Number(totales.mesesPendientes)).toBe(1);
+    expect(Number(totales.valor_producido_q)).toBe(2400);
+    expect(Number(totales.mesesPendientes)).toBe(2);
     expect(respuesta.body.meta.advertencia).toContain('parcial');
   });
 
@@ -304,7 +336,7 @@ describe('Analisis, proyecciones y reportes', () => {
 
     const d = respuesta.body.datos;
     expect(Number(d.produccion.periodo_kwh)).toBe(2500);
-    expect(Number(d.produccion.valor_q)).toBe(4200);
+    expect(Number(d.produccion.valor_q)).toBe(2400);
     expect(Number(d.proyeccion.kwh)).toBe(4000);
     expect(d.proyeccion.mesesConProyeccion).toBe(4);
     expect(d.proyeccion.mesesDelPeriodo).toBe(4);
@@ -349,7 +381,7 @@ describe('Analisis, proyecciones y reportes', () => {
     const r = respuesta.body.datos;
     expect(r.id_reporte).toBeGreaterThan(0);
     expect(Number(r.resumen.kwh)).toBe(2500);
-    expect(Number(r.resumen.valor_q)).toBe(4200);
+    expect(Number(r.resumen.valor_q)).toBe(2400);
     expect(r.cobertura.completa).toBe(false);
     expect(r.advertenciaOficial).toContain('NO puede considerarse un documento oficial completo');
 

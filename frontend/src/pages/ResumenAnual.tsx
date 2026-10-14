@@ -10,7 +10,7 @@ import { anioActual, kwh, numero, porcentaje, quetzales, tarifa } from '../lib/f
 interface FilaAnual {
   mes: number;
   mesNombre: string;
-  /** Trimestre calendario al que pertenece el mes (vigencia de la tarifa). */
+  /** Trimestre tarifario (inicia en noviembre) al que pertenece el mes. */
   trimestre: number;
   proyeccion_kwh: number | null;
   generacion_anio_anterior: number;

@@ -232,8 +232,8 @@ describe('Grupos de inversores, proyeccion del alta y carga manual por rango', (
       idProyecto = alta.body.datos.id_proyecto;
       [idGrupoA, idGrupoB] = alta.body.datos.grupos;
 
-      // Tarifa del I trimestre de 2026 para poder valorizar la carga.
-      await crearTarifaAprobada(idProyecto, 2026, 1, 2.0);
+      // Tarifa del I trimestre (nov 2025 - ene 2026) para poder valorizar la carga.
+      await crearTarifaAprobada(idProyecto, 2025, 1, 2.0);
     }, 60000);
 
     it('detecta los dias sin datos de cada grupo', async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, ErrorApi } from '../lib/api';
 import { useSesion } from '../lib/auth';
@@ -24,6 +24,11 @@ interface Proyecto {
   cliente: string;
   ubicacion: string | null;
   tipo_proyecto: string;
+  suministradora: 'DISTRIBUIDORA' | 'COMERCIALIZADORA' | null;
+  id_tipo_tarifa: number | null;
+  tipo_tarifa_sigla: string | null;
+  tipo_tarifa_nombre: string | null;
+  valor_pactado_kwh: number | null;
   capacidad_kwp: number | null;
   fecha_inicio: string | null;
   activo: number;
@@ -35,11 +40,24 @@ interface Proyecto {
   ultima_produccion: string | null;
 }
 
+interface TipoTarifa {
+  id_tipo_tarifa: number;
+  sigla: string;
+  nombre: string;
+}
+
 const VACIO = {
   id_cliente: '',
   nombre: '',
   ubicacion: '',
   tipo_proyecto: 'PPA',
+  // PPA trabaja con distribuidora y EPC con comercializadora.
+  suministradora: 'DISTRIBUIDORA' as string,
+  id_tipo_tarifa: '',
+  // Comercializadora: valor pactado fijo. Distribuidora: tarifa del trimestre en curso.
+  valor_pactado_kwh: '',
+  tarifa_vigente_kwh: '',
+  motivo_tarifa: '',
   capacidad_kwp: '',
   fecha_inicio: '',
   observaciones: '',
@@ -89,6 +107,12 @@ export function PaginaProyectos() {
 
   const listado = useListado<Proyecto>('proyectos', '/projects', { orden: 'nombre' });
 
+  const tiposTarifa = useQuery({
+    queryKey: ['catalogo', 'tipos-tarifa'],
+    staleTime: 300_000,
+    queryFn: async () => (await api.obtener<TipoTarifa[]>('/projects/rate-types')).datos,
+  });
+
   useEffect(() => {
     const cliente = parametros.get('cliente');
     if (cliente) listado.actualizar({ id_cliente: cliente });
@@ -99,6 +123,7 @@ export function PaginaProyectos() {
   const [formulario, setFormulario] = useState<typeof VACIO | null>(null);
   const [editando, setEditando] = useState<number | null>(null);
   const [paso, setPaso] = useState(1);
+  const [valorPactadoOriginal, setValorPactadoOriginal] = useState<string>('');
   const [anioProyeccion, setAnioProyeccion] = useState(anioActual());
   const [mesesProyeccion, setMesesProyeccion] = useState<string[]>(MESES_VACIOS);
   const [gruposNuevos, setGruposNuevos] = useState<GrupoNuevo[]>([{ ...GRUPO_VACIO }]);
@@ -114,6 +139,7 @@ export function PaginaProyectos() {
     setEditando(null);
     setError(null);
     setPaso(1);
+    setValorPactadoOriginal('');
     setAnioProyeccion(anioActual());
     setMesesProyeccion(MESES_VACIOS());
     setGruposNuevos([{ ...GRUPO_VACIO }]);
@@ -144,6 +170,21 @@ export function PaginaProyectos() {
     if (paso === 1) {
       if (!formulario.id_cliente) return 'Seleccione el cliente propietario del proyecto.';
       if (formulario.nombre.trim().length < 3) return 'Indique el nombre de la planta.';
+      if (!formulario.suministradora) return 'Seleccione la suministradora de energia.';
+      if (!formulario.id_tipo_tarifa) return 'Seleccione el tipo de tarifa del proyecto.';
+      if (formulario.suministradora === 'COMERCIALIZADORA') {
+        if (formulario.valor_pactado_kwh === '' || Number(formulario.valor_pactado_kwh) < 0) {
+          return 'Indique el valor pactado del kWh (Q por kWh).';
+        }
+        if (
+          editando &&
+          formulario.valor_pactado_kwh !== valorPactadoOriginal &&
+          valorPactadoOriginal !== '' &&
+          formulario.motivo_tarifa.trim().length < 10
+        ) {
+          return 'Indique el motivo del cambio del valor pactado (minimo 10 caracteres).';
+        }
+      }
       return null;
     }
     if (paso === 2) {
@@ -180,8 +221,12 @@ export function PaginaProyectos() {
     setOcupado(true);
     setError(null);
     try {
+      const { tarifa_vigente_kwh, motivo_tarifa, ...resto } = formulario;
+      const esComercializadora = formulario.suministradora === 'COMERCIALIZADORA';
       const cuerpo = {
-        ...formulario,
+        ...resto,
+        id_tipo_tarifa: Number(formulario.id_tipo_tarifa),
+        valor_pactado_kwh: esComercializadora ? Number(formulario.valor_pactado_kwh) : null,
         id_cliente: Number(formulario.id_cliente),
         capacidad_kwp: formulario.capacidad_kwp === '' ? null : Number(formulario.capacidad_kwp),
         ubicacion: formulario.ubicacion || null,
@@ -189,11 +234,16 @@ export function PaginaProyectos() {
         observaciones: formulario.observaciones || null,
       };
       if (editando) {
-        await api.actualizar(`/projects/${editando}`, cuerpo);
+        await api.actualizar(`/projects/${editando}`, {
+          ...cuerpo,
+          ...(motivo_tarifa.trim() ? { motivo_tarifa: motivo_tarifa.trim() } : {}),
+        });
         setExito('Proyecto actualizado correctamente.');
       } else {
         const respuesta = await api.crear<{ mensaje: string }>('/projects', {
           ...cuerpo,
+          tarifa_vigente_kwh:
+            !esComercializadora && tarifa_vigente_kwh !== '' ? Number(tarifa_vigente_kwh) : null,
           proyeccion: {
             anio: anioProyeccion,
             aprobarInmediato: true,
@@ -251,7 +301,8 @@ export function PaginaProyectos() {
           <h1>Proyectos solares</h1>
           <p style={{ color: 'var(--texto-suave)', fontSize: '0.86rem' }}>
             Cada proyecto se organiza en grupos de inversores, administra su tarifa
-            <strong> trimestral</strong> de kWh y su proyeccion anual repartida mes a mes.
+            <strong> trimestral</strong> de kWh (trimestres que inician en noviembre) y su proyeccion
+            anual repartida mes a mes.
           </p>
         </div>
         {gestionar ? (
@@ -321,6 +372,25 @@ export function PaginaProyectos() {
               orden: 'tipo',
               render: (f) => <span className="etiqueta etiqueta--azul">{f.tipo_proyecto}</span>,
             },
+            {
+              clave: 'suministro',
+              titulo: 'Suministradora',
+              render: (f) =>
+                f.suministradora ? (
+                  <span>
+                    {f.suministradora === 'DISTRIBUIDORA' ? 'Distribuidora' : 'Comercializadora'}
+                    {f.tipo_tarifa_sigla ? (
+                      <span className="etiqueta etiqueta--gris" style={{ marginLeft: '0.3rem' }} title={f.tipo_tarifa_nombre ?? ''}>
+                        {f.tipo_tarifa_sigla}
+                      </span>
+                    ) : (
+                      <span className="etiqueta etiqueta--ambar" style={{ marginLeft: '0.3rem' }}>Sin tipo de tarifa</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="etiqueta etiqueta--ambar">Por definir</span>
+                ),
+            },
             { clave: 'kwp', titulo: 'Potencia', numerica: true, render: (f) => kwp(f.capacidad_kwp) },
             { clave: 'inv', titulo: 'Inversores', numerica: true, render: (f) => String(f.inversores) },
             {
@@ -380,11 +450,22 @@ export function PaginaProyectos() {
                           setEditando(f.id_proyecto);
                           setError(null);
                           setPaso(1);
+                          setValorPactadoOriginal(
+                            f.valor_pactado_kwh === null ? '' : String(Number(f.valor_pactado_kwh)),
+                          );
                           setFormulario({
                             id_cliente: String(f.id_cliente),
                             nombre: f.nombre,
                             ubicacion: f.ubicacion ?? '',
                             tipo_proyecto: f.tipo_proyecto,
+                            suministradora:
+                              f.suministradora ??
+                              (f.tipo_proyecto === 'EPC' ? 'COMERCIALIZADORA' : 'DISTRIBUIDORA'),
+                            id_tipo_tarifa: f.id_tipo_tarifa === null ? '' : String(f.id_tipo_tarifa),
+                            valor_pactado_kwh:
+                              f.valor_pactado_kwh === null ? '' : String(Number(f.valor_pactado_kwh)),
+                            tarifa_vigente_kwh: '',
+                            motivo_tarifa: '',
                             capacidad_kwp: f.capacidad_kwp === null ? '' : String(f.capacidad_kwp),
                             fecha_inicio: f.fecha_inicio?.slice(0, 10) ?? '',
                             observaciones: '',
@@ -448,8 +529,10 @@ export function PaginaProyectos() {
               <>
                 <MensajeInfo>
                   La <strong>modalidad comercial</strong> puede ser PPA, EPC o EDS. La{' '}
-                  <strong>potencia instalada se expresa en kWp</strong>;
-                  la energia generada se registra aparte en kWh.
+                  <strong>suministradora</strong> define la tarifa: con <strong>distribuidora</strong>{' '}
+                  el kWh se renueva cada trimestre; con <strong>comercializadora</strong> rige el valor
+                  pactado. La <strong>potencia instalada se expresa en kWp</strong>; la energia
+                  generada se registra aparte en kWh.
                 </MensajeInfo>
                 <div className="formulario">
                   <CampoSelect
@@ -476,12 +559,88 @@ export function PaginaProyectos() {
                   <CampoSelect
                     etiqueta="Modalidad comercial"
                     value={formulario.tipo_proyecto}
-                    onChange={(e) => setFormulario({ ...formulario, tipo_proyecto: e.target.value })}
+                    onChange={(e) => {
+                      const tipo = e.target.value;
+                      // PPA -> distribuidora; EPC -> comercializadora; EDS es libre.
+                      const suministradora =
+                        tipo === 'PPA' ? 'DISTRIBUIDORA' : tipo === 'EPC' ? 'COMERCIALIZADORA' : formulario.suministradora;
+                      setFormulario({ ...formulario, tipo_proyecto: tipo, suministradora });
+                    }}
                   >
                     <option value="PPA">PPA</option>
                     <option value="EPC">EPC</option>
                     <option value="EDS">EDS</option>
                   </CampoSelect>
+                  <CampoSelect
+                    etiqueta="Suministradora de energia"
+                    obligatorio
+                    value={formulario.suministradora}
+                    disabled={formulario.tipo_proyecto === 'PPA' || formulario.tipo_proyecto === 'EPC'}
+                    error={erroresCampo.suministradora}
+                    ayuda={
+                      formulario.tipo_proyecto === 'PPA'
+                        ? 'Los proyectos PPA trabajan siempre con distribuidora.'
+                        : formulario.tipo_proyecto === 'EPC'
+                          ? 'Los proyectos EPC trabajan siempre con comercializadora.'
+                          : undefined
+                    }
+                    onChange={(e) => setFormulario({ ...formulario, suministradora: e.target.value })}
+                  >
+                    <option value="DISTRIBUIDORA">Distribuidora</option>
+                    <option value="COMERCIALIZADORA">Comercializadora</option>
+                  </CampoSelect>
+                  <CampoSelect
+                    etiqueta="Tipo de tarifa"
+                    obligatorio
+                    value={formulario.id_tipo_tarifa}
+                    error={erroresCampo.id_tipo_tarifa}
+                    onChange={(e) => setFormulario({ ...formulario, id_tipo_tarifa: e.target.value })}
+                  >
+                    <option value="">Seleccione el tipo de tarifa</option>
+                    {(tiposTarifa.data ?? []).map((t) => (
+                      <option key={t.id_tipo_tarifa} value={t.id_tipo_tarifa}>
+                        {t.sigla} - {t.nombre}
+                      </option>
+                    ))}
+                  </CampoSelect>
+                  {formulario.suministradora === 'COMERCIALIZADORA' ? (
+                    <CampoTexto
+                      etiqueta="Valor pactado del kWh (Q)"
+                      obligatorio
+                      type="number"
+                      min="0"
+                      step="0.000001"
+                      value={formulario.valor_pactado_kwh}
+                      error={erroresCampo.valor_pactado_kwh}
+                      ayuda="Valor fijo del contrato: no se renueva cada trimestre."
+                      onChange={(e) => setFormulario({ ...formulario, valor_pactado_kwh: e.target.value })}
+                    />
+                  ) : !editando ? (
+                    <CampoTexto
+                      etiqueta="Tarifa del trimestre en curso (Q por kWh)"
+                      type="number"
+                      min="0"
+                      step="0.000001"
+                      disabled={!formulario.id_tipo_tarifa}
+                      value={formulario.tarifa_vigente_kwh}
+                      error={erroresCampo.tarifa_vigente_kwh}
+                      ayuda="Se habilita al elegir el tipo de tarifa. Se renueva cada trimestre desde la pestaña Tarifas."
+                      onChange={(e) => setFormulario({ ...formulario, tarifa_vigente_kwh: e.target.value })}
+                    />
+                  ) : null}
+                  {editando &&
+                  formulario.suministradora === 'COMERCIALIZADORA' &&
+                  valorPactadoOriginal !== '' &&
+                  formulario.valor_pactado_kwh !== valorPactadoOriginal ? (
+                    <CampoTexto
+                      etiqueta="Motivo del cambio del valor pactado"
+                      obligatorio
+                      ancho
+                      value={formulario.motivo_tarifa}
+                      ayuda="Se recalcula la produccion ya valorizada; el motivo queda en la auditoria."
+                      onChange={(e) => setFormulario({ ...formulario, motivo_tarifa: e.target.value })}
+                    />
+                  ) : null}
                   <CampoTexto
                     etiqueta="Ubicacion"
                     value={formulario.ubicacion}

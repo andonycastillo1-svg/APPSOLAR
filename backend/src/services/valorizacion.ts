@@ -4,8 +4,10 @@ import { errores } from '../utils/errors';
 import {
   diasRestantesDelTrimestre,
   etiquetaTrimestre,
+  periodoTarifario,
+  sqlAnioTarifario,
+  sqlTrimestre,
   trimestreActual,
-  trimestreDeMes,
   trimestreSiguiente,
   trimestresDelPeriodo,
 } from '../utils/fechas';
@@ -14,7 +16,10 @@ import {
  * Motor de valorizacion monetaria.
  *
  * Reglas fundamentales:
- *  - La tarifa del kWh tiene vigencia TRIMESTRAL (trimestres calendario).
+ *  - La tarifa del kWh tiene vigencia TRIMESTRAL con trimestres tarifarios que
+ *    inician en noviembre (Nov-Ene, Feb-Abr, May-Jul, Ago-Oct).
+ *  - Un proyecto de COMERCIALIZADORA no renueva tarifa: su valor pactado se
+ *    materializa como tarifa aprobada (origen PACTADA) en cada trimestre.
  *  - Cada registro de produccion se valoriza con la tarifa APROBADA del
  *    proyecto correspondiente al TRIMESTRE de su propia fecha.
  *  - Si el trimestre no tiene tarifa aprobada, los kWh se conservan intactos
@@ -39,6 +44,62 @@ export async function buscarTarifaAprobada(
   trimestre: number,
   executor: Executor = getPool(),
 ): Promise<TarifaAprobada | null> {
+  const tarifa = await queryOne<TarifaAprobada>(
+    `SELECT id_tarifa, id_proyecto, anio, trimestre, costo_kwh, moneda
+       FROM tarifas_kwh
+      WHERE id_proyecto = ? AND anio = ? AND trimestre = ? AND estado = 'APROBADA'
+      LIMIT 1`,
+    [idProyecto, anio, trimestre],
+    executor,
+  );
+  if (tarifa) return tarifa;
+  return materializarTarifaPactada(idProyecto, anio, trimestre, executor);
+}
+
+/**
+ * Proyectos de COMERCIALIZADORA: el valor pactado rige todos los trimestres.
+ * Se registra como tarifa aprobada para conservar la trazabilidad (id_tarifa)
+ * de cada registro de produccion sin pedir una renovacion trimestral.
+ */
+export async function materializarTarifaPactada(
+  idProyecto: number,
+  anio: number,
+  trimestre: number,
+  executor: Executor = getPool(),
+): Promise<TarifaAprobada | null> {
+  const proyecto = await queryOne<{ suministradora: string | null; valor_pactado_kwh: number | null }>(
+    'SELECT suministradora, valor_pactado_kwh FROM proyectos WHERE id_proyecto = ?',
+    [idProyecto],
+    executor,
+  );
+  if (
+    !proyecto ||
+    proyecto.suministradora !== 'COMERCIALIZADORA' ||
+    proyecto.valor_pactado_kwh === null ||
+    proyecto.valor_pactado_kwh === undefined
+  ) {
+    return null;
+  }
+
+  try {
+    await execute(
+      `INSERT INTO tarifas_kwh
+         (id_proyecto, anio, trimestre, mes, costo_kwh, moneda, estado, origen, motivo, fecha_aprobacion)
+       SELECT ?, ?, ?, NULL, ?, 'GTQ', 'APROBADA', 'PACTADA',
+              'Valor pactado del proyecto (comercializadora)', NOW()
+         FROM DUAL
+        WHERE NOT EXISTS (
+          SELECT 1 FROM tarifas_kwh
+           WHERE id_proyecto = ? AND anio = ? AND trimestre = ? AND estado <> 'ANULADA'
+        )`,
+      [idProyecto, anio, trimestre, proyecto.valor_pactado_kwh, idProyecto, anio, trimestre],
+      executor,
+    );
+  } catch (error) {
+    // Otra solicitud la creo al mismo tiempo: se relee a continuacion.
+    if ((error as { code?: string }).code !== 'ER_DUP_ENTRY') throw error;
+  }
+
   return queryOne<TarifaAprobada>(
     `SELECT id_tarifa, id_proyecto, anio, trimestre, costo_kwh, moneda
        FROM tarifas_kwh
@@ -49,14 +110,15 @@ export async function buscarTarifaAprobada(
   );
 }
 
-/** Atajo cuando se conoce el mes: resuelve su trimestre calendario. */
+/** Atajo cuando se conoce el mes: resuelve su trimestre tarifario. */
 export async function buscarTarifaDelMes(
   idProyecto: number,
   anio: number,
   mes: number,
   executor: Executor = getPool(),
 ): Promise<TarifaAprobada | null> {
-  return buscarTarifaAprobada(idProyecto, anio, trimestreDeMes(mes), executor);
+  const periodo = periodoTarifario(anio, mes);
+  return buscarTarifaAprobada(idProyecto, periodo.anio, periodo.trimestre, executor);
 }
 
 /** Cache por lote para no repetir consultas al valorizar muchos registros. */
@@ -66,10 +128,13 @@ export class CacheTarifas {
   constructor(private readonly executor: Executor = getPool()) {}
 
   async obtener(idProyecto: number, anio: number, mes: number): Promise<TarifaAprobada | null> {
-    const trimestre = trimestreDeMes(mes);
-    const clave = `${idProyecto}|${anio}|T${trimestre}`;
+    const periodo = periodoTarifario(anio, mes);
+    const clave = `${idProyecto}|${periodo.anio}|T${periodo.trimestre}`;
     if (!this.mapa.has(clave)) {
-      this.mapa.set(clave, await buscarTarifaAprobada(idProyecto, anio, trimestre, this.executor));
+      this.mapa.set(
+        clave,
+        await buscarTarifaAprobada(idProyecto, periodo.anio, periodo.trimestre, this.executor),
+      );
     }
     return this.mapa.get(clave) ?? null;
   }
@@ -140,7 +205,7 @@ export async function recalcularPendientes(
   const pendientes = await query<{ id_produccion: number; kwh: number }>(
     `SELECT id_produccion, kwh
        FROM produccion
-      WHERE id_proyecto = ? AND anio = ? AND CEIL(mes / 3) = ?
+      WHERE id_proyecto = ? AND ${sqlAnioTarifario('anio', 'mes')} = ? AND ${sqlTrimestre('mes')} = ?
         AND activo = 1 AND estado_valorizacion = 'PENDIENTE_DE_TARIFA'`,
     [idProyecto, anio, trimestre],
     executor,
@@ -309,9 +374,9 @@ export async function mesesCerradosDelTrimestre(
 ): Promise<number[]> {
   const filas = await query<{ mes: number }>(
     `SELECT mes FROM cierres_mensuales
-      WHERE id_proyecto = ? AND anio = ? AND estado = 'CERRADO'
-        AND CEIL(mes / 3) = ?
-      ORDER BY mes`,
+      WHERE id_proyecto = ? AND estado = 'CERRADO'
+        AND ${sqlAnioTarifario('anio', 'mes')} = ? AND ${sqlTrimestre('mes')} = ?
+      ORDER BY anio, mes`,
     [idProyecto, anio, trimestre],
     executor,
   );
@@ -394,14 +459,14 @@ export async function coberturaTarifaria(
     pendientes: number;
     kwh_pendientes: number;
   }>(
-    `SELECT p.id_proyecto, p.anio, CEIL(p.mes / 3) AS trimestre,
+    `SELECT p.id_proyecto, ${sqlAnioTarifario('p.anio', 'p.mes')} AS anio, ${sqlTrimestre('p.mes')} AS trimestre,
             SUM(CASE WHEN p.estado_valorizacion = 'PENDIENTE_DE_TARIFA' THEN 1 ELSE 0 END) AS pendientes,
             COALESCE(SUM(CASE WHEN p.estado_valorizacion = 'PENDIENTE_DE_TARIFA' THEN p.kwh ELSE 0 END), 0) AS kwh_pendientes
        FROM produccion p
        JOIN proyectos pr ON pr.id_proyecto = p.id_proyecto
       WHERE ${donde}
-      GROUP BY p.id_proyecto, p.anio, CEIL(p.mes / 3)
-      ORDER BY p.anio, trimestre`,
+      GROUP BY p.id_proyecto, ${sqlAnioTarifario('p.anio', 'p.mes')}, ${sqlTrimestre('p.mes')}
+      ORDER BY anio, trimestre`,
     params,
     executor,
   );
@@ -484,6 +549,8 @@ export async function alertaTarifaTrimestral(
       `SELECT pr.id_proyecto, pr.nombre AS proyecto
          FROM proyectos pr
         WHERE pr.activo = 1 ${filtro}
+          -- La comercializadora no renueva tarifa: rige su valor pactado.
+          AND NOT (pr.suministradora = 'COMERCIALIZADORA' AND pr.valor_pactado_kwh IS NOT NULL)
           AND NOT EXISTS (
             SELECT 1 FROM tarifas_kwh t
              WHERE t.id_proyecto = pr.id_proyecto

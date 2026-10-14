@@ -3,7 +3,7 @@ import { logger } from '../config/logger';
 import { execute, query, queryOne } from './pool';
 import { hashPassword, validarFortalezaPassword } from '../services/auth';
 import { calcularValorQ, redondearKwh } from '../utils/numeros';
-import { diasEnMes } from '../utils/fechas';
+import { diasEnMes, etiquetaTrimestre, periodoTarifario } from '../utils/fechas';
 
 /**
  * Datos iniciales.
@@ -265,14 +265,17 @@ export async function sembrarDemostracion(): Promise<void> {
   for (const proyecto of proyectos) {
     const resultado = await execute(
       `INSERT INTO proyectos
-         (id_cliente, nombre, ubicacion, tipo_proyecto, capacidad_kwp, fecha_inicio,
-          observaciones, activo, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+         (id_cliente, nombre, ubicacion, tipo_proyecto, suministradora, id_tipo_tarifa,
+          valor_pactado_kwh, capacidad_kwp, fecha_inicio, observaciones, activo, created_by)
+       VALUES (?, ?, ?, ?, ?, (SELECT id_tipo_tarifa FROM tipos_tarifa WHERE sigla = ?), ?, ?, ?, ?, 1, ?)`,
       [
         proyecto.cliente,
         proyecto.nombre,
         proyecto.ubicacion,
         proyecto.tipo,
+        proyecto.tipo === 'EPC' ? 'COMERCIALIZADORA' : 'DISTRIBUIDORA',
+        proyecto.tipo === 'PPA' ? 'BTDA' : proyecto.tipo === 'EPC' ? 'MTDA' : 'BTSH',
+        proyecto.tipo === 'EPC' ? 0.95 : null,
         proyecto.kwp,
         proyecto.inicio,
         'Proyecto de demostracion con datos ficticios.',
@@ -479,23 +482,26 @@ export async function sembrarDemostracion(): Promise<void> {
   }
 
   // --- Tarifas TRIMESTRALES ---------------------------------------------
-  // El costo del kWh se pacta por trimestre calendario: los tres meses de un
-  // trimestre comparten siempre la misma tarifa. El trimestre en curso del
-  // primer proyecto queda deliberadamente SIN tarifa para que la alerta de
-  // actualizacion trimestral sea visible en la demostracion.
-  const trimestreActualDemo = Math.ceil(mesActual / 3);
+  // Trimestres tarifarios: Nov-Ene, Feb-Abr, May-Jul, Ago-Oct. Solo los
+  // proyectos de DISTRIBUIDORA renuevan tarifa; la comercializadora usa su
+  // valor pactado. El trimestre en curso del primer proyecto queda
+  // deliberadamente SIN tarifa para que la alerta sea visible en la demo.
+  const periodoActualDemo = periodoTarifario(anioActual, mesActual);
   const tarifasPorProyecto = [1.12, 0.98, 1.35];
 
   for (let indice = 0; indice < idsProyecto.length; indice += 1) {
+    if (proyectos[indice].tipo === 'EPC') continue;
     const base = tarifasPorProyecto[indice];
-    for (const anio of [anioAnterior, anioActual]) {
-      const trimestresDelAnio = anio === anioActual ? trimestreActualDemo : 4;
+    for (let anio = periodoActualDemo.anio - 2; anio <= periodoActualDemo.anio; anio += 1) {
+      const trimestresDelAnio = anio === periodoActualDemo.anio ? periodoActualDemo.trimestre : 4;
       for (let trimestre = 1; trimestre <= trimestresDelAnio; trimestre += 1) {
         // Trimestre deliberadamente sin tarifa en el primer proyecto.
-        if (indice === 0 && anio === anioActual && trimestre === trimestreActualDemo) continue;
+        if (indice === 0 && anio === periodoActualDemo.anio && trimestre === periodoActualDemo.trimestre) {
+          continue;
+        }
 
         const costo = Number(
-          (base + (trimestre - 1) * 0.045 + (anio - anioAnterior) * 0.06).toFixed(6),
+          (base + (trimestre - 1) * 0.045 + (anio - (periodoActualDemo.anio - 2)) * 0.06).toFixed(6),
         );
         await execute(
           `INSERT INTO tarifas_kwh
@@ -794,6 +800,6 @@ export async function sembrarDemostracion(): Promise<void> {
   );
   logger.info(
     `Trimestre deliberadamente SIN tarifa para demostrar la alerta trimestral: ` +
-      `T${trimestreActualDemo} de ${anioActual} en "${proyectos[0].nombre}".`,
+      `${etiquetaTrimestre(periodoActualDemo.anio, periodoActualDemo.trimestre)} en "${proyectos[0].nombre}".`,
   );
 }

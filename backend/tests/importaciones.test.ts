@@ -194,10 +194,10 @@ describe('Importacion de historicos (ETL)', () => {
   // -------------------------------------------------------------------------
 
   it('carga el formato historico del Excel y valoriza con la tarifa del trimestre', async () => {
-    // I trimestre con tarifa; II trimestre deliberadamente sin ella.
+    // I trimestre (nov-ene) con tarifa; II trimestre (feb-abr) deliberadamente sin ella.
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, trimestre: 1, costo_kwh: 1.0, aprobarInmediato: true })
+      .send({ anio: 2024, trimestre: 1, costo_kwh: 1.0, aprobarInmediato: true })
       .expect(201);
 
     const previa = await comoUsuario(operativo)
@@ -206,8 +206,8 @@ describe('Importacion de historicos (ETL)', () => {
         'archivo',
         csv(
           CABECERA_HISTORICA,
-          `${planta},PPA,2025,Enero,1000,Operacion normal`,
-          `${planta},PPA,2025,Febrero,500,`,
+          `${planta},PPA,2024,Diciembre,1000,Operacion normal`,
+          `${planta},PPA,2025,Enero,500,`,
           `${planta},PPA,2025,Abril,300,Trimestre sin tarifa aun`,
         ),
         'historico.csv',
@@ -232,10 +232,10 @@ describe('Importacion de historicos (ETL)', () => {
 
     const filas = await filasProduccion(datos.idProyecto);
     expect(filas).toHaveLength(3);
-    // Enero y febrero comparten la tarifa del I trimestre (Q 1.00).
+    // Diciembre y enero comparten la tarifa del I trimestre (Q 1.00).
     expect(Number(filas[0].valor_q)).toBe(1000);
     expect(Number(filas[1].valor_q)).toBe(500);
-    // Abril pertenece al II trimestre, que aun no tiene tarifa aprobada.
+    // Abril pertenece al II trimestre (feb-abr), que aun no tiene tarifa aprobada.
     expect(filas[2].estado_valorizacion).toBe('PENDIENTE_DE_TARIFA');
     expect(Number(filas[2].kwh)).toBe(300);
 
@@ -481,7 +481,7 @@ describe('Importacion de historicos (ETL)', () => {
     expect(resumen.body.datos.periodosConMezclaDeNiveles).toHaveLength(1);
   });
 
-  it('no suma la granularidad mensual cuando el mismo inversor tiene lecturas diarias', async () => {
+  it('con lecturas diarias parciales y la cifra mensual, el mes usa la mensual y nunca suma ambas', async () => {
     await comoUsuario(operativo)
       .post('/api/production')
       .send({
@@ -510,8 +510,9 @@ describe('Importacion de historicos (ETL)', () => {
       .get(`/api/production/summary?desde=2025-03-01&hasta=2025-03-31&id_proyecto=${datos.idProyecto}`)
       .expect(200);
 
-    // Prevalece la lectura diaria: 300, no 3300.
-    expect(Number(resumen.body.datos.kwh)).toBe(300);
+    // La diaria solo cubre 3 de 31 dias: el mes vale lo que dice la cifra mensual
+    // (3000). No son 300 (solo esos dias) ni 3300 (suma de ambas).
+    expect(Number(resumen.body.datos.kwh)).toBe(3000);
   });
 
   // -------------------------------------------------------------------------
@@ -597,7 +598,7 @@ describe('Importacion de historicos (ETL)', () => {
   it('impide cargar datos en un periodo cerrado', async () => {
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, trimestre: 1, costo_kwh: 1.0, aprobarInmediato: true })
+      .send({ anio: 2024, trimestre: 1, costo_kwh: 1.0, aprobarInmediato: true })
       .expect(201);
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates/close`)

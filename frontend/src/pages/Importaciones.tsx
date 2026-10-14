@@ -81,6 +81,7 @@ interface Previsualizacion {
     fecha: string;
     kwh: number;
     serial: string | null;
+    grupo?: string | null;
     comentarios: string | null;
   }>;
   grupos: Grupo[];
@@ -431,9 +432,11 @@ function Asistente({ alCerrar }: { alCerrar: () => void }) {
       {paso === 0 ? (
         <>
           <MensajeInfo titulo="Seleccione el destino de la carga">
-            Para el <strong>formato historico</strong> (Planta, Tipo, Año, Mes, Generacion) puede dejar los
-            campos vacios: el sistema identifica cada planta por su nombre. Para la{' '}
-            <strong>plantilla normalizada</strong> debe elegir al menos el proyecto.
+            Para el <strong>formato historico</strong> (Planta, Grupo, Inversor, Año, Mes, Generacion) puede
+            dejar los campos vacios: el sistema identifica la planta, el grupo y el inversor por su nombre y
+            serial. Si quiere cargar <strong>una planta completa</strong>, elija el proyecto y en el paso
+            siguiente descargue su plantilla ya rellenada. Para la <strong>plantilla normalizada</strong>{' '}
+            debe elegir al menos el proyecto.
           </MensajeInfo>
           <div className="formulario">
             <CampoSelect
@@ -502,6 +505,33 @@ function Asistente({ alCerrar }: { alCerrar: () => void }) {
             Las plantillas incluyen una hoja de instrucciones con el significado y las reglas de cada
             columna. El archivo de ejemplo con errores sirve para comprobar la validacion.
           </MensajeInfo>
+          <section className="tarjeta" style={{ marginBottom: '1rem' }}>
+            <h3>Planta completa: por mes, grupo e inversor</h3>
+            <p style={{ margin: '0.3rem 0 0.7rem' }}>
+              Descargue la plantilla ya rellenada con los grupos e inversores de la planta y un renglón por cada
+              mes: solo falta escribir la generación (kWh). Elija la planta y el año en el paso anterior.
+            </p>
+            <button
+              type="button"
+              className="boton"
+              disabled={!idProyecto}
+              onClick={() =>
+                void descargar('/imports/template', {
+                  formato: 'PLANTA_COMPLETA',
+                  tipo: 'xlsx',
+                  id_proyecto: idProyecto,
+                  anio: anioForzado || String(anioActual()),
+                })
+              }
+            >
+              Plantilla de la planta completa (XLSX)
+            </button>
+            {!idProyecto ? (
+              <p style={{ marginTop: '0.5rem', fontSize: '0.85rem' }}>
+                Vuelva al paso 1 y seleccione el proyecto para habilitar esta plantilla.
+              </p>
+            ) : null}
+          </section>
           <div className="acciones" style={{ flexWrap: 'wrap' }}>
             <button
               type="button"
@@ -711,11 +741,11 @@ function Asistente({ alCerrar }: { alCerrar: () => void }) {
               columnas={[
                 { clave: 'fila', titulo: 'Fila', numerica: true, render: (f) => f.fila },
                 { clave: 'planta', titulo: 'Planta', render: (f) => f.planta ?? '—' },
-                { clave: 'tipo', titulo: 'Modalidad', render: (f) => f.tipo ?? '—' },
+                { clave: 'grupo', titulo: 'Grupo', render: (f) => f.grupo ?? '—' },
                 { clave: 'periodo', titulo: 'Periodo', render: (f) => `${nombreMes(f.mes)} ${f.anio}` },
                 { clave: 'fecha', titulo: 'Fecha', render: (f) => fecha(f.fecha) },
                 { clave: 'kwh', titulo: 'Energia', numerica: true, render: (f) => kwh(f.kwh) },
-                { clave: 'serial', titulo: 'Inversor', render: (f) => f.serial ?? 'Consolidado' },
+                { clave: 'serial', titulo: 'Inversor', render: (f) => f.serial ?? (f.grupo ? 'Consolidado del grupo' : 'Consolidado') },
                 { clave: 'coment', titulo: 'Comentarios', render: (f) => f.comentarios ?? '—' },
               ]}
               filas={previa.muestra}

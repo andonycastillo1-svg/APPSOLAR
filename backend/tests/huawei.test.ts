@@ -69,7 +69,7 @@ describe('Sincronizacion Huawei SmartPVMS', () => {
   it('sincroniza correctamente y valoriza con la tarifa del mes', async () => {
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, trimestre: 2, costo_kwh: 1.5, aprobarInmediato: true })
+      .send({ anio: 2024, trimestre: 3, costo_kwh: 1.5, aprobarInmediato: true })
       .expect(201);
 
     comportamiento = {
@@ -180,7 +180,7 @@ describe('Sincronizacion Huawei SmartPVMS', () => {
   it('omite los periodos cerrados durante la sincronizacion', async () => {
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
-      .send({ anio: 2025, trimestre: 2, costo_kwh: 1.0, aprobarInmediato: true })
+      .send({ anio: 2024, trimestre: 3, costo_kwh: 1.0, aprobarInmediato: true })
       .expect(201);
     await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates/close`)

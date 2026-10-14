@@ -17,7 +17,9 @@
     "test:watch": "vitest",
     "test:e2e": "vitest run tests/e2e",
     "lint": "eslint \"src/**/*.ts\"",
-    "db:plantillas": "tsx src/db/generarPlantillas.ts"
+    "db:plantillas": "tsx src/db/generarPlantillas.ts",
+    "db:plantilla-carga": "tsx src/db/cargaMasiva.ts plantilla",
+    "db:carga-masiva": "tsx src/db/cargaMasiva.ts sql"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -20,17 +20,59 @@ import { auditarDesdeRequest } from '../../services/auditoria';
 import { tarifasRouter } from '../tarifas/tarifas.routes';
 import { proyeccionesRouter } from '../proyecciones/proyecciones.routes';
 import { gruposRouter } from '../grupos/grupos.routes';
+import { mesesCerradosDelTrimestre, recalcularPorTarifa } from '../../services/valorizacion';
+import { trimestreActual } from '../../utils/fechas';
 
 export const proyectosRouter = Router();
 proyectosRouter.use(requiereAutenticacion);
 
 const TIPOS = ['PPA', 'EPC', 'EDS'] as const;
+const SUMINISTRADORAS = ['DISTRIBUIDORA', 'COMERCIALIZADORA'] as const;
+
+interface DatosSuministro {
+  tipo_proyecto?: string | null;
+  suministradora?: string | null;
+  id_tipo_tarifa?: number | null;
+  valor_pactado_kwh?: number | null;
+}
+
+/**
+ * Reglas de la suministradora:
+ *  - PPA siempre trabaja con DISTRIBUIDORA y EPC con COMERCIALIZADORA.
+ *  - DISTRIBUIDORA: tipo de tarifa obligatorio; el valor del kWh se renueva
+ *    cada trimestre desde Tarifas, de modo que no lleva valor pactado.
+ *  - COMERCIALIZADORA: tipo de tarifa y valor pactado obligatorios.
+ */
+export function validarSuministro(d: DatosSuministro): string | null {
+  if (!d.suministradora) return 'Seleccione la suministradora de energia (distribuidora o comercializadora).';
+  if (d.tipo_proyecto === 'PPA' && d.suministradora !== 'DISTRIBUIDORA') {
+    return 'Un proyecto PPA trabaja siempre con distribuidora.';
+  }
+  if (d.tipo_proyecto === 'EPC' && d.suministradora !== 'COMERCIALIZADORA') {
+    return 'Un proyecto EPC trabaja siempre con comercializadora.';
+  }
+  if (!d.id_tipo_tarifa) return 'Seleccione el tipo de tarifa del proyecto.';
+  if (d.suministradora === 'COMERCIALIZADORA') {
+    if (d.valor_pactado_kwh === null || d.valor_pactado_kwh === undefined) {
+      return 'Indique el valor pactado del kWh de la comercializadora.';
+    }
+  } else if (d.valor_pactado_kwh !== null && d.valor_pactado_kwh !== undefined) {
+    return 'El valor pactado solo aplica a comercializadora; en distribuidora la tarifa se renueva por trimestre.';
+  }
+  return null;
+}
 
 const esquemaProyecto = z.object({
   id_cliente: z.coerce.number().int().positive('Seleccione el cliente propietario del proyecto.'),
   nombre: z.string().trim().min(3, 'El nombre debe tener al menos 3 caracteres.').max(160),
   ubicacion: z.string().trim().max(255).optional().nullable(),
   tipo_proyecto: z.enum(TIPOS, { errorMap: () => ({ message: 'La modalidad comercial debe ser PPA, EPC o EDS.' }) }),
+  suministradora: z
+    .enum(SUMINISTRADORAS, { errorMap: () => ({ message: 'La suministradora debe ser distribuidora o comercializadora.' }) })
+    .optional()
+    .nullable(),
+  id_tipo_tarifa: z.coerce.number().int().positive('Seleccione el tipo de tarifa.').optional().nullable(),
+  valor_pactado_kwh: z.coerce.number().min(0, 'El valor pactado no puede ser negativo.').optional().nullable(),
   capacidad_kwp: z.coerce.number().min(0, 'La potencia instalada no puede ser negativa.').optional().nullable(),
   fecha_inicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use el formato aaaa-mm-dd.').optional().nullable(),
   observaciones: z.string().trim().max(500).optional().nullable(),
@@ -61,7 +103,10 @@ const esquemaGrupoInicial = z.object({
   ubicacion: z.string().trim().max(255).optional().nullable(),
 });
 
-const esquemaAlta = esquemaProyecto.extend({
+const esquemaAlta = esquemaProyecto
+  .extend({
+  /** Distribuidora: tarifa del trimestre en curso, capturada en el alta. */
+  tarifa_vigente_kwh: z.coerce.number().min(0, 'La tarifa no puede ser negativa.').optional().nullable(),
   proyeccion: z.object({
     anio: z.coerce.number().int().min(2000).max(2100),
     meses: z
@@ -70,7 +115,11 @@ const esquemaAlta = esquemaProyecto.extend({
     aprobarInmediato: z.boolean().default(true),
   }),
   grupos: z.array(esquemaGrupoInicial).max(50).optional(),
-});
+  })
+  .superRefine((d, ctx) => {
+    const mensaje = validarSuministro(d);
+    if (mensaje) ctx.addIssue({ code: z.ZodIssueCode.custom, message: mensaje, path: ['suministradora'] });
+  });
 
 const COLUMNAS = {
   nombre: 'pr.nombre',
@@ -133,6 +182,7 @@ proyectosRouter.get(
      */
     const filas = await query(
       `SELECT pr.*, c.nombre AS cliente, c.nit AS cliente_nit,
+              tt.sigla AS tipo_tarifa_sigla, tt.nombre AS tipo_tarifa_nombre,
               (SELECT COUNT(*) FROM inversores i WHERE i.id_proyecto = pr.id_proyecto AND i.activo = 1) AS inversores,
               (SELECT COALESCE(SUM(p.kwh), 0) FROM produccion p
                 WHERE p.id_proyecto = pr.id_proyecto AND p.activo = 1
@@ -148,6 +198,7 @@ proyectosRouter.get(
               (SELECT MAX(p.fecha) FROM produccion p
                 WHERE p.id_proyecto = pr.id_proyecto AND p.activo = 1) AS ultima_produccion
          FROM proyectos pr JOIN clientes c ON c.id_cliente = pr.id_cliente
+         LEFT JOIN tipos_tarifa tt ON tt.id_tipo_tarifa = pr.id_tipo_tarifa
         WHERE ${donde}
         ORDER BY ${columnaOrden(p.orden, COLUMNAS, 'pr.nombre')} ${p.direccion === 'desc' ? 'DESC' : 'ASC'}
         LIMIT ? OFFSET ?`,
@@ -163,14 +214,30 @@ proyectosRouter.get(
   }),
 );
 
+/** Catalogo de tipos de tarifa para el campo del alta/edicion del proyecto. */
+proyectosRouter.get(
+  '/rate-types',
+  requierePermiso(PERMISOS.PROYECTOS_VER),
+  asyncHandler(async (_req, res) => {
+    ok(
+      res,
+      await query(
+        'SELECT id_tipo_tarifa, sigla, nombre FROM tipos_tarifa WHERE activo = 1 ORDER BY sigla',
+      ),
+    );
+  }),
+);
+
 proyectosRouter.get(
   '/:id',
   requierePermiso(PERMISOS.PROYECTOS_VER),
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const proyecto = await queryOne(
-      `SELECT pr.*, c.nombre AS cliente, c.nit AS cliente_nit
+      `SELECT pr.*, c.nombre AS cliente, c.nit AS cliente_nit,
+              tt.sigla AS tipo_tarifa_sigla, tt.nombre AS tipo_tarifa_nombre
          FROM proyectos pr JOIN clientes c ON c.id_cliente = pr.id_cliente
+         LEFT JOIN tipos_tarifa tt ON tt.id_tipo_tarifa = pr.id_tipo_tarifa
         WHERE pr.id_proyecto = ?`,
       [id],
     );
@@ -288,6 +355,12 @@ proyectosRouter.post(
       );
     }
 
+    const tipoTarifa = await queryOne<{ activo: number }>(
+      'SELECT activo FROM tipos_tarifa WHERE id_tipo_tarifa = ?',
+      [datos.id_tipo_tarifa],
+    );
+    if (!tipoTarifa || !tipoTarifa.activo) throw errores.validacion('El tipo de tarifa indicado no existe.');
+
     const nombresGrupo = (datos.grupos ?? []).map((g) => g.nombre);
     if (new Set(nombresGrupo).size !== nombresGrupo.length) {
       throw errores.validacion('Los nombres de los grupos deben ser distintos entre si.');
@@ -298,14 +371,17 @@ proyectosRouter.post(
     const resultado = await withTransaction(async (conn) => {
       const proyecto = await execute(
         `INSERT INTO proyectos
-           (id_cliente, nombre, ubicacion, tipo_proyecto, capacidad_kwp, fecha_inicio,
-            observaciones, activo, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id_cliente, nombre, ubicacion, tipo_proyecto, suministradora, id_tipo_tarifa,
+            valor_pactado_kwh, capacidad_kwp, fecha_inicio, observaciones, activo, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           datos.id_cliente,
           datos.nombre,
           datos.ubicacion || null,
           datos.tipo_proyecto,
+          datos.suministradora,
+          datos.id_tipo_tarifa,
+          datos.suministradora === 'COMERCIALIZADORA' ? datos.valor_pactado_kwh : null,
           datos.capacidad_kwp ?? null,
           datos.fecha_inicio || null,
           datos.observaciones || null,
@@ -315,6 +391,33 @@ proyectosRouter.post(
         conn,
       );
       const idProyecto = proyecto.insertId;
+
+      // Distribuidora: la tarifa del trimestre en curso se captura en el alta.
+      if (
+        datos.suministradora === 'DISTRIBUIDORA' &&
+        datos.tarifa_vigente_kwh !== null &&
+        datos.tarifa_vigente_kwh !== undefined
+      ) {
+        const vigente = trimestreActual();
+        const aprueba = req.usuario!.permisos.includes(PERMISOS.TARIFAS_APROBAR);
+        await execute(
+          `INSERT INTO tarifas_kwh
+             (id_proyecto, anio, trimestre, mes, costo_kwh, moneda, estado, origen, motivo,
+              creado_por, aprobado_por, fecha_aprobacion)
+           VALUES (?, ?, ?, NULL, ?, 'GTQ', ?, 'MANUAL', 'Capturada en el alta del proyecto', ?, ?, ?)`,
+          [
+            idProyecto,
+            vigente.anio,
+            vigente.trimestre,
+            datos.tarifa_vigente_kwh,
+            aprueba ? 'APROBADA' : 'BORRADOR',
+            req.usuario!.id_usuario,
+            aprueba ? req.usuario!.id_usuario : null,
+            aprueba ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null,
+          ],
+          conn,
+        );
+      }
 
       const apruebaProyeccion =
         datos.proyeccion.aprobarInmediato &&
@@ -400,10 +503,10 @@ proyectosRouter.post(
 proyectosRouter.put(
   '/:id',
   requierePermiso(PERMISOS.PROYECTOS_GESTIONAR),
-  validarCuerpo(esquemaProyecto.partial()),
+  validarCuerpo(esquemaProyecto.partial().extend({ motivo_tarifa: z.string().trim().max(500).optional() })),
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
-    const datos = req.body as Partial<z.infer<typeof esquemaProyecto>>;
+    const datos = req.body as Partial<z.infer<typeof esquemaProyecto>> & { motivo_tarifa?: string };
     const actual = await queryOne('SELECT * FROM proyectos WHERE id_proyecto = ?', [id]);
     if (!actual) throw errores.noEncontrado('el proyecto solicitado');
 
@@ -415,11 +518,67 @@ proyectosRouter.put(
       if (duplicado) throw errores.conflicto('Ya existe otro proyecto con ese nombre.');
     }
 
+    // Si se toca algo del suministro, el conjunto resultante debe ser coherente.
+    const tocaSuministro = ['tipo_proyecto', 'suministradora', 'id_tipo_tarifa', 'valor_pactado_kwh'].some(
+      (k) => (datos as Record<string, unknown>)[k] !== undefined,
+    );
+    const previo = actual as DatosSuministro;
+    const resultante: DatosSuministro = {
+      tipo_proyecto: datos.tipo_proyecto ?? previo.tipo_proyecto,
+      suministradora: datos.suministradora !== undefined ? datos.suministradora : previo.suministradora,
+      id_tipo_tarifa: datos.id_tipo_tarifa !== undefined ? datos.id_tipo_tarifa : previo.id_tipo_tarifa,
+      valor_pactado_kwh:
+        datos.valor_pactado_kwh !== undefined ? datos.valor_pactado_kwh : previo.valor_pactado_kwh,
+    };
+    // Al pasar a distribuidora el valor pactado deja de aplicar.
+    if (datos.suministradora === 'DISTRIBUIDORA' && datos.valor_pactado_kwh === undefined) {
+      resultante.valor_pactado_kwh = null;
+    }
+    if (tocaSuministro) {
+      const mensaje = validarSuministro(resultante);
+      if (mensaje) throw errores.validacion(mensaje);
+    }
+
+    const valorPrevio =
+      previo.valor_pactado_kwh === null || previo.valor_pactado_kwh === undefined
+        ? null
+        : Number(previo.valor_pactado_kwh);
+    const cambiaValorPactado =
+      resultante.suministradora === 'COMERCIALIZADORA' &&
+      valorPrevio !== null &&
+      resultante.valor_pactado_kwh !== null &&
+      resultante.valor_pactado_kwh !== undefined &&
+      Number(resultante.valor_pactado_kwh) !== valorPrevio;
+    if (cambiaValorPactado && (datos.motivo_tarifa ?? '').trim().length < 10) {
+      throw errores.validacion(
+        'Para cambiar el valor pactado indique el motivo (minimo 10 caracteres): se recalcula la produccion valorizada.',
+      );
+    }
+    if (cambiaValorPactado) {
+      const pactadas = await query<{ id_tarifa: number; anio: number; trimestre: number }>(
+        `SELECT id_tarifa, anio, trimestre FROM tarifas_kwh
+          WHERE id_proyecto = ? AND origen = 'PACTADA' AND estado = 'APROBADA'`,
+        [id],
+      );
+      for (const t of pactadas) {
+        const cerrados = await mesesCerradosDelTrimestre(id, t.anio, t.trimestre);
+        if (cerrados.length > 0) {
+          throw errores.reglaNegocio(
+            'El valor pactado no puede cambiarse: hay meses cerrados valorizados con el valor actual. Reabra esos periodos primero.',
+            { anio: t.anio, trimestre: t.trimestre, mesesCerrados: cerrados },
+          );
+        }
+      }
+    }
+
     const mapa: Record<string, unknown> = {
       id_cliente: datos.id_cliente,
       nombre: datos.nombre,
       ubicacion: datos.ubicacion,
       tipo_proyecto: datos.tipo_proyecto,
+      suministradora: tocaSuministro ? resultante.suministradora : undefined,
+      id_tipo_tarifa: tocaSuministro ? resultante.id_tipo_tarifa : undefined,
+      valor_pactado_kwh: tocaSuministro ? (resultante.valor_pactado_kwh ?? null) : undefined,
       capacidad_kwp: datos.capacidad_kwp,
       fecha_inicio: datos.fecha_inicio,
       observaciones: datos.observaciones,
@@ -428,11 +587,30 @@ proyectosRouter.put(
     const campos = Object.entries(mapa).filter(([, v]) => v !== undefined);
     if (campos.length === 0) throw errores.solicitudInvalida('No se enviaron cambios.');
 
-    await execute(
-      `UPDATE proyectos SET ${campos.map(([k]) => `${k} = ?`).join(', ')}, updated_by = ?
-        WHERE id_proyecto = ?`,
-      [...campos.map(([, v]) => v), req.usuario!.id_usuario, id],
-    );
+    await withTransaction(async (conn) => {
+      await execute(
+        `UPDATE proyectos SET ${campos.map(([k]) => `${k} = ?`).join(', ')}, updated_by = ?
+          WHERE id_proyecto = ?`,
+        [...campos.map(([, v]) => v), req.usuario!.id_usuario, id],
+        conn,
+      );
+      if (cambiaValorPactado) {
+        const pactadas = await query<{ id_tarifa: number }>(
+          `SELECT id_tarifa FROM tarifas_kwh
+            WHERE id_proyecto = ? AND origen = 'PACTADA' AND estado = 'APROBADA'`,
+          [id],
+          conn,
+        );
+        for (const t of pactadas) {
+          await execute(
+            'UPDATE tarifas_kwh SET costo_kwh = ?, motivo = ?, updated_by = ? WHERE id_tarifa = ?',
+            [resultante.valor_pactado_kwh, datos.motivo_tarifa, req.usuario!.id_usuario, t.id_tarifa],
+            conn,
+          );
+          await recalcularPorTarifa(t.id_tarifa, Number(resultante.valor_pactado_kwh), conn);
+        }
+      }
+    });
 
     await auditarDesdeRequest(req, {
       accion: 'PROYECTO_ACTUALIZADO',
@@ -440,6 +618,7 @@ proyectosRouter.put(
       idEntidad: id,
       antes: actual,
       despues: datos,
+      motivo: cambiaValorPactado ? (datos.motivo_tarifa ?? null) : null,
     });
     ok(res, { mensaje: 'Proyecto actualizado correctamente.' });
   }),

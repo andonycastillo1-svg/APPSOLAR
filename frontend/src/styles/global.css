@@ -149,7 +149,8 @@ a { color: var(--azul-700); }
   color: #d7e5ee;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  /* Sin overflow propio en escritorio: asi el boton fijo del fondo (position: sticky)
+     se ancla al borde inferior de la pantalla aunque la pagina sea larga. */
 }
 
 .lateral__marca {
@@ -172,6 +173,41 @@ a { color: var(--azul-700); }
 .lateral nav {
   padding: 0.6rem 0.55rem 1.5rem;
 }
+
+.lateral__sync {
+  /* Al fondo del menu, debajo de todos los modulos, y siempre visible en pantalla. */
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 0.9rem 0.9rem 1.1rem;
+  background: var(--azul-800);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.lateral__sync-boton {
+  width: 100%;
+  justify-content: center;
+  font-weight: 600;
+}
+.lateral__sync-ayuda {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #9fbdd0;
+}
+.lateral__sync-resultado {
+  margin-top: 0.55rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radio-sm);
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: #eaf3f8;
+}
+.lateral__sync-resultado ul { margin: 0.3rem 0 0 1rem; padding: 0; }
+.lateral__sync-resultado--exito { border-left: 3px solid #6fd39a; }
+.lateral__sync-resultado--aviso { border-left: 3px solid #f3c969; }
+.lateral__sync-resultado--error { border-left: 3px solid #f08a8a; }
 
 .lateral__grupo {
   margin-top: 0.9rem;
@@ -678,6 +714,7 @@ legend { font-size: 0.84rem; font-weight: 640; color: var(--azul-800); padding: 
     transform: translateX(-100%);
     transition: transform 180ms ease;
     z-index: 50;
+    overflow-y: auto;
   }
   .lateral[data-abierto='true'] { transform: translateX(0); }
   .menu-movil { display: inline-flex; }
