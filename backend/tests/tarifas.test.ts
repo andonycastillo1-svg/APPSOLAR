@@ -27,7 +27,8 @@ describe('Tarifas trimestrales y valorizacion', () => {
     await prepararBaseDeDatos();
     await crearUsuario('tar.admin@retse.com.gt', 'ADMINISTRATIVO');
     await crearUsuario('tar.coord@retse.com.gt', 'OPERATIVO', ['tarifas.gestionar']);
-    await crearUsuario('tar.oper@retse.com.gt', 'OPERATIVO');
+    // Usuario sin permisos de escritura: el operativo SI gestiona tarifas.
+    await crearUsuario('tar.oper@retse.com.gt', 'GERENCIAL');
 
     admin = await iniciarSesion('tar.admin@retse.com.gt', PASSWORD_PRUEBAS);
     coordinador = await iniciarSesion('tar.coord@retse.com.gt', PASSWORD_PRUEBAS);
@@ -156,20 +157,25 @@ describe('Tarifas trimestrales y valorizacion', () => {
     expect(JSON.stringify(trimestreInvalido.body.error.detalles)).toMatch(/trimestre|4/i);
   });
 
-  it('un operativo sin tarifas.gestionar no puede crear tarifas', async () => {
+  it('un usuario sin tarifas.gestionar (gerencial) no puede crear tarifas', async () => {
     await comoUsuario(operativo)
       .post(`/api/projects/${datos.idProyecto}/rates`)
       .send({ anio: 2026, trimestre: 3, costo_kwh: 1.1 })
       .expect(403);
   });
 
-  it('el coordinador no puede aprobar por si mismo: la aprobacion es un permiso aparte', async () => {
-    const respuesta = await comoUsuario(coordinador)
+  it('el operativo registra y aprueba tarifas; el gerencial no puede', async () => {
+    const aprobada = await comoUsuario(coordinador)
       .post(`/api/projects/${datos.idProyecto}/rates`)
       .send({ anio: 2026, trimestre: 3, costo_kwh: 1.1, aprobarInmediato: true })
-      .expect(403);
+      .expect(201);
+    expect(aprobada.body.datos.estado).toBe('APROBADA');
 
-    expect(respuesta.body.error.detalles.permiso).toBe('tarifas.aprobar');
+    const respuesta = await comoUsuario(operativo)
+      .post(`/api/projects/${datos.idProyecto}/rates`)
+      .send({ anio: 2026, trimestre: 2, costo_kwh: 1.1, aprobarInmediato: true })
+      .expect(403);
+    expect(respuesta.body.error.detalles.permiso).toBe('tarifas.gestionar');
   });
 
   // -------------------------------------------------------------------------
@@ -385,13 +391,13 @@ describe('Tarifas trimestrales y valorizacion', () => {
     expect(auditoria?.motivo).toContain('addendum');
   });
 
-  it('un usuario sin tarifas.recalcular no puede corregir una tarifa aprobada', async () => {
+  it('un usuario sin tarifas.recalcular (gerencial) no puede corregir una tarifa aprobada', async () => {
     const tarifa = await comoUsuario(admin)
       .post(`/api/projects/${datos.idProyecto}/rates`)
       .send({ anio: 2026, trimestre: 3, costo_kwh: 1.0, aprobarInmediato: true })
       .expect(201);
 
-    await comoUsuario(coordinador)
+    await comoUsuario(operativo)
       .post(`/api/projects/${datos.idProyecto}/rates/${tarifa.body.datos.id_tarifa}/recalculate`)
       .send({ costo_kwh: 2, motivo: 'Intento sin autorizacion suficiente', confirmado: true })
       .expect(403);

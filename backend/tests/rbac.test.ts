@@ -65,9 +65,32 @@ describe('Control de acceso basado en roles', () => {
     }
   });
 
-  it('el usuario operativo NO recibe tarifas.gestionar por su rol', () => {
-    expect(operativo.usuario.permisos).not.toContain('tarifas.gestionar');
-    expect(coordinador.usuario.permisos).toContain('tarifas.gestionar');
+  it('el usuario operativo gestiona los datos del negocio y las tarifas, pero no administra el sistema', () => {
+    for (const permiso of [
+      'clientes.gestionar',
+      'proyectos.gestionar',
+      'inversores.gestionar',
+      'produccion.registrar',
+      'produccion.corregir',
+      'importaciones.cargar',
+      'tarifas.gestionar',
+      'tarifas.aprobar',
+      'proyecciones.gestionar',
+      'produccion.sincronizar_ahora',
+    ]) {
+      expect(operativo.usuario.permisos, permiso).toContain(permiso);
+    }
+    for (const permiso of [
+      'usuarios.ver',
+      'usuarios.gestionar',
+      'auditoria.ver',
+      'config.ver',
+      'config.gestionar',
+      'huawei.configurar',
+      'salud.ver',
+    ]) {
+      expect(operativo.usuario.permisos, permiso).not.toContain(permiso);
+    }
   });
 
   it('el usuario gerencial es estrictamente de solo lectura', () => {
@@ -100,7 +123,7 @@ describe('Control de acceso basado en roles', () => {
           comoUsuario(s)
             .post('/api/clients')
             .send({ nombre: `Cliente RBAC ${Math.random()}`, nit: `${Math.floor(Math.random() * 9999999)}-1` }),
-        esperado: { admin: 201, operativo: 403, coordinador: 403, gerencial: 403 },
+        esperado: { admin: 201, operativo: 201, coordinador: 201, gerencial: 403 },
       },
       {
         descripcion: 'crear un proyecto',
@@ -108,7 +131,7 @@ describe('Control de acceso basado en roles', () => {
           comoUsuario(s)
             .post('/api/projects')
             .send(cuerpoAltaProyecto(d.idCliente, `Proyecto RBAC ${Math.random()}`)),
-        esperado: { admin: 201, operativo: 403, coordinador: 403, gerencial: 403 },
+        esperado: { admin: 201, operativo: 201, coordinador: 201, gerencial: 403 },
       },
       {
         descripcion: 'crear un inversor',
@@ -134,7 +157,7 @@ describe('Control de acceso basado en roles', () => {
               trimestre: Math.floor(Math.random() * 4) + 1,
               costo_kwh: 1.1,
             }),
-        esperado: { admin: 201, operativo: 403, coordinador: 201, gerencial: 403 },
+        esperado: { admin: 201, operativo: 201, coordinador: 201, gerencial: 403 },
       },
       {
         descripcion: 'consultar el calendario de tarifas',
@@ -241,16 +264,16 @@ describe('Control de acceso basado en roles', () => {
 
     const otorgado = await comoUsuario(admin)
       .put(`/api/users/${idOperativo}/permissions`)
-      .send({ otorgados: ['tarifas.gestionar'], revocados: [] })
+      .send({ otorgados: ['auditoria.ver'], revocados: [] })
       .expect(200);
-    expect(otorgado.body.datos.permisosEfectivos).toContain('tarifas.gestionar');
+    expect(otorgado.body.datos.permisosEfectivos).toContain('auditoria.ver');
 
     const revocado = await comoUsuario(admin)
       .put(`/api/users/${idOperativo}/permissions`)
       .send({ otorgados: [], revocados: ['produccion.registrar'] })
       .expect(200);
     expect(revocado.body.datos.permisosEfectivos).not.toContain('produccion.registrar');
-    expect(revocado.body.datos.permisosEfectivos).not.toContain('tarifas.gestionar');
+    expect(revocado.body.datos.permisosEfectivos).not.toContain('auditoria.ver');
   });
 
   it('impide que el ultimo administrador activo se desactive', async () => {

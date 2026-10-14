@@ -158,7 +158,7 @@ async function crearUsuariosDemo(): Promise<DemoContexto> {
     ids[definicion.email] = resultado.insertId;
   }
 
-  // El coordinador es un usuario OPERATIVO con el permiso individual
+  // El coordinador es un usuario OPERATIVO (hoy el rol ya incluye ese permiso)
   // `tarifas.gestionar` (no se creo un cuarto rol global).
   const permiso = await queryOne<{ id_permiso: number }>(
     "SELECT id_permiso FROM permisos WHERE codigo = 'tarifas.gestionar'",

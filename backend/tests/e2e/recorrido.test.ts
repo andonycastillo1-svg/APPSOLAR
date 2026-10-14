@@ -103,7 +103,9 @@ describe('Recorrido completo de punta a punta', () => {
     gerencial = await iniciarSesion('e2e.gerencia@retse.com.gt', 'Recorrido.2026#E2E');
 
     expect(coordinador.usuario.permisos).toContain('tarifas.gestionar');
-    expect(operativo.usuario.permisos).not.toContain('tarifas.gestionar');
+    // El operativo gestiona tarifas por su rol; el gerencial es de solo lectura.
+    expect(operativo.usuario.permisos).toContain('tarifas.gestionar');
+    expect(gerencial.usuario.permisos).not.toContain('tarifas.gestionar');
   });
 
   it('2. crea el cliente, dos proyectos con modalidad PPA/EPC y sus inversores', async () => {
@@ -255,8 +257,8 @@ describe('Recorrido completo de punta a punta', () => {
   });
 
   it('4. el coordinador registra las tarifas y el administrador las aprueba', async () => {
-    // El operativo comun no puede registrar tarifas.
-    await comoUsuario(operativo)
+    // El gerencial no puede registrar tarifas.
+    await comoUsuario(gerencial)
       .post(`/api/projects/${idProyectoPpa}/rates`)
       .send({ anio: 2026, trimestre: 1, costo_kwh: 1.1 })
       .expect(403);

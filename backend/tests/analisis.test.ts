@@ -213,8 +213,8 @@ describe('Analisis, proyecciones y reportes', () => {
     expect(aprobacion.body.datos.aprobadas).toBe(4);
   });
 
-  it('un operativo sin permiso no puede gestionar proyecciones', async () => {
-    await comoUsuario(operativo)
+  it('un gerencial no puede gestionar proyecciones', async () => {
+    await comoUsuario(gerencial)
       .post(`/api/projects/${datos.idProyecto}/projections`)
       .send({ anio: 2026, meses: [{ mes: 5, proyeccion_kwh: 100 }] })
       .expect(403);

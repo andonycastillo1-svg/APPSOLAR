@@ -50,19 +50,31 @@ export type RolCodigo = 'ADMINISTRATIVO' | 'OPERATIVO' | 'GERENCIAL';
 export const PERMISOS_POR_ROL: Record<RolCodigo, Permiso[]> = {
   ADMINISTRATIVO: TODOS_LOS_PERMISOS,
 
-  // El usuario operativo NO recibe `tarifas.gestionar` por defecto: ese permiso
-  // se otorga individualmente al coordinador mediante `usuario_permisos`.
+  // El operativo gestiona toda la informacion del negocio (clientes, proyectos,
+  // grupos, inversores, produccion, historicos, proyecciones y tarifas) y puede
+  // sincronizar. NO administra el sistema: usuarios, permisos, auditoria,
+  // configuracion, respaldos ni credenciales de la integracion.
   OPERATIVO: [
     PERMISOS.CLIENTES_VER,
+    PERMISOS.CLIENTES_GESTIONAR,
     PERMISOS.PROYECTOS_VER,
+    PERMISOS.PROYECTOS_GESTIONAR,
     PERMISOS.INVERSORES_VER,
     PERMISOS.INVERSORES_GESTIONAR,
     PERMISOS.PRODUCCION_VER,
     PERMISOS.PRODUCCION_REGISTRAR,
+    PERMISOS.PRODUCCION_CORREGIR,
     PERMISOS.IMPORTACIONES_VER,
     PERMISOS.IMPORTACIONES_CARGAR,
     PERMISOS.TARIFAS_VER,
+    PERMISOS.TARIFAS_GESTIONAR,
+    PERMISOS.TARIFAS_APROBAR,
+    PERMISOS.TARIFAS_RECALCULAR,
+    PERMISOS.TARIFAS_CERRAR_MES,
+    PERMISOS.TARIFAS_REABRIR_MES,
     PERMISOS.PROYECCIONES_VER,
+    PERMISOS.PROYECCIONES_GESTIONAR,
+    PERMISOS.PROYECCIONES_APROBAR,
     PERMISOS.HUAWEI_VER,
     PERMISOS.HUAWEI_SINCRONIZAR,
     PERMISOS.PRODUCCION_SINCRONIZAR_AHORA,
