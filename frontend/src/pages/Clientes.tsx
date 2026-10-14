@@ -6,6 +6,7 @@ import { useSesion } from '../lib/auth';
 import { useListado } from '../hooks/useListado';
 import { CampoCasilla, CampoSelect, CampoTexto } from '../components/Campos';
 import { Confirmacion, MensajeError, MensajeExito, Modal } from '../components/Estados';
+import { Icono } from '../components/Iconos';
 import { Paginacion, Tabla } from '../components/Tabla';
 import { fecha } from '../lib/formato';
 
@@ -129,7 +130,7 @@ export function PaginaClientes() {
         </div>
         {gestionar ? (
           <button type="button" className="boton" onClick={abrirNuevo}>
-            Nuevo cliente
+            <Icono nombre="mas" tamano={18} /> Nuevo cliente
           </button>
         ) : null}
       </div>

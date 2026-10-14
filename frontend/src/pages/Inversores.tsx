@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { Icono } from '../components/Iconos';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { api, ErrorApi } from '../lib/api';
@@ -200,7 +201,7 @@ export function PaginaInversores() {
               setFormulario({ ...VACIO });
             }}
           >
-            Nuevo inversor
+            <Icono nombre="mas" tamano={18} /> Nuevo inversor
           </button>
         ) : null}
       </div>

@@ -15,6 +15,7 @@ import {
   SinPermiso,
 } from '../components/Estados';
 import { Tabla } from '../components/Tabla';
+import { Icono, type NombreIcono } from '../components/Iconos';
 import {
   anioActual,
   anioTarifarioActual,
@@ -263,13 +264,13 @@ export function PaginaProyectoDetalle() {
 
   return (
     <>
-      <div className="barra-superior">
-        <div>
-          <p style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>
+      <section className="proyecto-hero">
+        <div className="proyecto-hero__titulo">
+          <p className="proyecto-hero__migas">
             <Link to="/proyectos">Proyectos</Link> · {p.cliente}
           </p>
           <h1>{p.nombre}</h1>
-          <div className="acciones" style={{ marginTop: '0.35rem' }}>
+          <div className="acciones" style={{ marginTop: '0.45rem' }}>
             <span className="etiqueta etiqueta--azul">{p.tipo_proyecto}</span>
             {p.suministradora ? (
               <span className="etiqueta etiqueta--gris" title={p.tipo_tarifa_nombre ?? undefined}>
@@ -283,34 +284,49 @@ export function PaginaProyectoDetalle() {
             <span className={p.activo ? 'etiqueta etiqueta--verde' : 'etiqueta etiqueta--gris'}>
               {p.activo ? 'Activo' : 'Inactivo'}
             </span>
-            <span style={{ fontSize: '0.83rem', color: 'var(--texto-suave)' }}>
-              {p.ubicacion ?? 'Sin ubicacion'} · {kwp(p.capacidad_kwp)}
-            </span>
+            <span className="proyecto-hero__ubicacion">{p.ubicacion ?? 'Sin ubicacion'}</span>
           </div>
         </div>
-      </div>
+        <dl className="proyecto-hero__datos">
+          <div>
+            <dt>Potencia</dt>
+            <dd>{kwp(p.capacidad_kwp)}</dd>
+          </div>
+          <div>
+            <dt>Inversores</dt>
+            <dd>{p.inversores.length}</dd>
+          </div>
+          <div>
+            <dt>Paneles</dt>
+            <dd>{numero(p.panelesProyecto.cantidadPaneles, 0)}</dd>
+          </div>
+          <div>
+            <dt>Producido</dt>
+            <dd>{kwh(p.resumen?.kwh_total ?? 0)}</dd>
+          </div>
+          <div>
+            <dt>Valor</dt>
+            <dd>{quetzales(p.resumen?.valor_total ?? 0)}</dd>
+          </div>
+        </dl>
+      </section>
 
       <nav className="no-imprimir" aria-label="Secciones del proyecto">
-        <ul className="pasos" style={{ marginBottom: '1rem' }}>
+        <ul className="pestanas">
           {([
-            ['resumen', 'Resumen e inversores'],
-            ['grupos', 'Grupos de inversores'],
-            ['tarifas', 'Tarifas de energia'],
-            ['proyecciones', 'Proyecciones mensuales'],
-          ] as Array<[Pestana, string]>).map(([clave, texto]) => (
-            <li key={clave} aria-current={pestana === clave ? 'step' : undefined}>
+            ['resumen', 'Resumen e inversores', 'tablero'],
+            ['grupos', 'Grupos de inversores', 'inversores'],
+            ['tarifas', 'Tarifas de energia', 'reportes'],
+            ['proyecciones', 'Proyecciones mensuales', 'resumen'],
+          ] as Array<[Pestana, string, NombreIcono]>).map(([clave, texto, icono]) => (
+            <li key={clave}>
               <button
                 type="button"
+                className="pestanas__boton"
+                aria-current={pestana === clave ? 'page' : undefined}
                 onClick={() => setPestana(clave)}
-                style={{
-                  background: 'none',
-                  border: 0,
-                  font: 'inherit',
-                  color: 'inherit',
-                  cursor: 'pointer',
-                  padding: 0,
-                }}
               >
+                <Icono nombre={icono} tamano={18} />
                 {texto}
               </button>
             </li>

@@ -15,6 +15,8 @@ import {
   Modal,
 } from '../components/Estados';
 import { Paginacion, Tabla } from '../components/Tabla';
+import { Icono } from '../components/Iconos';
+import { SelectorTipo } from '../components/Graficas';
 import { anioActual, fecha, kwh, kwp, nombreMes, numero, quetzales } from '../lib/formato';
 
 interface Proyecto {
@@ -123,6 +125,7 @@ export function PaginaProyectos() {
   const [formulario, setFormulario] = useState<typeof VACIO | null>(null);
   const [editando, setEditando] = useState<number | null>(null);
   const [paso, setPaso] = useState(1);
+  const [vista, setVista] = useState<'tabla' | 'tarjetas'>('tabla');
   const [valorPactadoOriginal, setValorPactadoOriginal] = useState<string>('');
   const [anioProyeccion, setAnioProyeccion] = useState(anioActual());
   const [mesesProyeccion, setMesesProyeccion] = useState<string[]>(MESES_VACIOS);
@@ -307,7 +310,7 @@ export function PaginaProyectos() {
         </div>
         {gestionar ? (
           <button type="button" className="boton" onClick={abrirAlta}>
-            Nuevo proyecto
+            <Icono nombre="mas" tamano={18} /> Nuevo proyecto
           </button>
         ) : null}
       </div>
@@ -355,6 +358,88 @@ export function PaginaProyectos() {
           </CampoSelect>
         </div>
 
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.7rem' }}>
+          <SelectorTipo<'tabla' | 'tarjetas'>
+            etiqueta="Forma de presentar los proyectos"
+            valor={vista}
+            alCambiar={setVista}
+            opciones={[
+              { valor: 'tabla', texto: 'Tabla' },
+              { valor: 'tarjetas', texto: 'Tarjetas' },
+            ]}
+          />
+        </div>
+
+        {vista === 'tarjetas' ? (
+          <>
+            {(listado.filas ?? []).length === 0 && !listado.cargando ? (
+              <p className="estado">No hay proyectos que coincidan con los filtros.</p>
+            ) : (
+              <div className="tarjetas-proyecto">
+                {(listado.filas ?? []).map((f) => {
+                  const total = Number(f.kwh_por_inversor) + Number(f.kwh_consolidado);
+                  return (
+                    <article key={f.id_proyecto} className="proyecto-tarjeta">
+                      <header>
+                        <span className="proyecto-tarjeta__icono">
+                          <Icono nombre="proyectos" tamano={22} />
+                        </span>
+                        <div>
+                          <h3>
+                            <Link to={`/proyectos/${f.id_proyecto}`}>{f.nombre}</Link>
+                          </h3>
+                          <p>{f.cliente}</p>
+                        </div>
+                        <span className={f.activo ? 'etiqueta etiqueta--verde' : 'etiqueta etiqueta--gris'}>
+                          {f.activo ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </header>
+                      <div className="acciones" style={{ marginBottom: '0.7rem' }}>
+                        <span className="etiqueta etiqueta--azul">{f.tipo_proyecto}</span>
+                        {f.suministradora ? (
+                          <span className="etiqueta etiqueta--gris">
+                            {f.suministradora === 'DISTRIBUIDORA' ? 'Distribuidora' : 'Comercializadora'}
+                            {f.tipo_tarifa_sigla ? ` · ${f.tipo_tarifa_sigla}` : ''}
+                          </span>
+                        ) : null}
+                        {f.registros_pendientes > 0 ? (
+                          <span className="etiqueta etiqueta--ambar">{f.registros_pendientes} pendiente(s)</span>
+                        ) : null}
+                      </div>
+                      <dl className="proyecto-tarjeta__datos">
+                        <div>
+                          <dt>Potencia</dt>
+                          <dd>{kwp(f.capacidad_kwp)}</dd>
+                        </div>
+                        <div>
+                          <dt>Inversores</dt>
+                          <dd>{f.inversores}</dd>
+                        </div>
+                        <div>
+                          <dt>Producido</dt>
+                          <dd>{kwh(total)}</dd>
+                        </div>
+                        <div>
+                          <dt>Valor</dt>
+                          <dd>{quetzales(f.valor_q_total)}</dd>
+                        </div>
+                      </dl>
+                      <footer>
+                        <span>Ultimo dato: {fecha(f.ultima_produccion)}</span>
+                        <Link className="boton boton--secundario boton--pequeno" to={`/proyectos/${f.id_proyecto}`}>
+                          Abrir <Icono nombre="flecha" tamano={15} />
+                        </Link>
+                      </footer>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+            {listado.meta ? <Paginacion {...listado.meta} alCambiar={listado.irAPagina} /> : null}
+          </>
+        ) : null}
+
+        {vista === 'tabla' ? (
         <Tabla<Proyecto>
           titulo="Listado de proyectos"
           descripcion="La produccion acumulada se muestra separada por nivel de detalle para evitar el doble conteo."
@@ -439,7 +524,7 @@ export function PaginaProyectos() {
               render: (f) => (
                 <div className="acciones no-imprimir">
                   <Link className="boton boton--secundario boton--pequeno" to={`/proyectos/${f.id_proyecto}`}>
-                    Detalle
+                    Detalle <Icono nombre="flecha" tamano={15} />
                   </Link>
                   {gestionar ? (
                     <>
@@ -473,7 +558,7 @@ export function PaginaProyectos() {
                           });
                         }}
                       >
-                        Editar
+                        <Icono nombre="editar" tamano={15} /> Editar
                       </button>
                       <button
                         type="button"
@@ -500,6 +585,7 @@ export function PaginaProyectos() {
           vacioDescripcion="Registre primero un cliente y luego su proyecto solar."
           pie={listado.meta ? <Paginacion {...listado.meta} alCambiar={listado.irAPagina} /> : undefined}
         />
+        ) : null}
       </section>
 
       {formulario ? (

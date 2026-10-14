@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Icono } from '../components/Iconos';
 import { useQuery } from '@tanstack/react-query';
 import { api, ErrorApi } from '../lib/api';
 import { NOMBRE_ROL, useSesion, type RolCodigo } from '../lib/auth';
@@ -176,7 +177,7 @@ export function PaginaUsuarios() {
               setFormulario({ ...VACIO });
             }}
           >
-            Nuevo usuario
+            <Icono nombre="mas" tamano={18} /> Nuevo usuario
           </button>
         ) : null}
       </div>
