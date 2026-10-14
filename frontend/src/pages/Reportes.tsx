@@ -4,7 +4,6 @@ import { useSesion } from '../lib/auth';
 import { useListado } from '../hooks/useListado';
 import { useCatalogos } from '../hooks/useCatalogos';
 import { CampoCasilla, CampoSelect, CampoTexto } from '../components/Campos';
-import { Icono } from '../components/Iconos';
 import {
   MensajeAlerta,
   MensajeError,
@@ -45,6 +44,27 @@ interface ReporteGuardado {
   created_at: string;
 }
 
+interface FilaInventario {
+  id_proyecto: number;
+  cliente: string;
+  nit: string;
+  proyecto: string;
+  ubicacion: string;
+  modalidad: string;
+  suministradora: string;
+  tipo_tarifa: string;
+  valor_pactado: number | null;
+  potencia_kwp: number;
+  grupos: number;
+  inversores: number;
+  paneles: number;
+  potencia_paneles_kwp: number;
+  produccion_kwh: number;
+  valor_q: number;
+  pendientes: number;
+  estado: string;
+}
+
 interface ReporteGenerado {
   id_reporte: number | null;
   empresa: string;
@@ -76,6 +96,21 @@ interface ReporteGenerado {
     completa: boolean;
   };
   resumenAnual: { totales: Record<string, number | null> };
+  inventario: {
+    filas: FilaInventario[];
+    totales: {
+      clientes: number;
+      proyectos: number;
+      grupos: number;
+      inversores: number;
+      paneles: number;
+      potencia_kwp: number;
+      potencia_paneles_kwp: number;
+      produccion_kwh: number;
+      valor_q: number;
+      pendientes: number;
+    };
+  } | null;
   desgloseMensual: Array<{
     mes: string;
     proyeccion_kwh: number | null;
@@ -103,10 +138,9 @@ export function PaginaReportes() {
     id_proyecto: '',
     granularidad: 'MENSUAL',
     anio: String(anioActual()),
+    solo_activos: false,
   });
   const [inversoresSeleccionados, setInversoresSeleccionados] = useState<number[]>([]);
-  const [inventario, setInventario] = useState({ id_cliente: '', soloActivos: false });
-  const [descargandoInventario, setDescargandoInventario] = useState(false);
   const [generado, setGenerado] = useState<ReporteGenerado | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [exito, setExito] = useState<string | null>(null);
@@ -124,21 +158,6 @@ export function PaginaReportes() {
     [catalogos.inversores, parametros.id_proyecto],
   );
 
-  const descargarInventario = async () => {
-    setDescargandoInventario(true);
-    setError(null);
-    try {
-      await descargar('/reports/inventory/export', {
-        ...(inventario.id_cliente ? { id_cliente: inventario.id_cliente } : {}),
-        solo_activos: inventario.soloActivos ? '1' : '0',
-      });
-    } catch (fallo) {
-      setError(fallo);
-    } finally {
-      setDescargandoInventario(false);
-    }
-  };
-
   const generar = async () => {
     setOcupado(true);
     setError(null);
@@ -154,6 +173,7 @@ export function PaginaReportes() {
         inversores: inversoresSeleccionados.length > 0 ? inversoresSeleccionados : null,
         granularidad: parametros.granularidad,
         anio: Number(parametros.anio),
+        solo_activos: parametros.solo_activos,
         guardar: true,
       });
       setGenerado(respuesta.datos);
@@ -185,49 +205,6 @@ export function PaginaReportes() {
       {exito ? <MensajeExito>{exito}</MensajeExito> : null}
       {error ? <MensajeError error={error} /> : null}
 
-      {puede('reportes.exportar') ? (
-        <section className="tarjeta no-imprimir inventario">
-          <div className="inventario__texto">
-            <span className="inventario__icono">
-              <Icono nombre="descargar" tamano={26} />
-            </span>
-            <div>
-              <h2 style={{ marginBottom: '0.2rem' }}>Inventario de proyectos (stock)</h2>
-              <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--texto-suave)' }}>
-                Excel con el total de clientes, proyectos, grupos, inversores y paneles, la potencia
-                instalada, la producción acumulada y el detalle de todo lo que lleva cada proyecto.
-              </p>
-            </div>
-          </div>
-          <div className="inventario__acciones">
-            <CampoSelect
-              etiqueta="Cliente"
-              value={inventario.id_cliente}
-              onChange={(e) => setInventario({ ...inventario, id_cliente: e.target.value })}
-            >
-              <option value="">Todos los clientes</option>
-              {catalogos.clientes.map((c) => (
-                <option key={c.id_cliente} value={c.id_cliente}>{c.nombre}</option>
-              ))}
-            </CampoSelect>
-            <CampoCasilla
-              etiqueta="Solo proyectos activos"
-              checked={inventario.soloActivos}
-              onChange={(e) => setInventario({ ...inventario, soloActivos: e.target.checked })}
-            />
-            <button
-              type="button"
-              className="boton boton--verde"
-              disabled={descargandoInventario}
-              onClick={() => void descargarInventario()}
-            >
-              <Icono nombre="descargar" tamano={18} />{' '}
-              {descargandoInventario ? 'Generando…' : 'Descargar inventario en Excel'}
-            </button>
-          </div>
-        </section>
-      ) : null}
-
       <section className="tarjeta no-imprimir">
         <h2>Parametros del reporte</h2>
         <div className="filtros">
@@ -240,7 +217,15 @@ export function PaginaReportes() {
             <option value="RESUMEN_ANUAL">Resumen anual</option>
             <option value="COMPARATIVO">Comparativo</option>
             <option value="VALORIZACION">Valorizacion economica</option>
+            <option value="INVENTARIO">Inventario de proyectos</option>
           </CampoSelect>
+          {parametros.tipo === 'INVENTARIO' ? (
+            <CampoCasilla
+              etiqueta="Solo proyectos activos"
+              checked={parametros.solo_activos}
+              onChange={(e) => setParametros({ ...parametros, solo_activos: e.target.checked })}
+            />
+          ) : null}
           <CampoTexto
             etiqueta="Nombre del reporte"
             value={parametros.nombre}
@@ -400,6 +385,127 @@ export function PaginaReportes() {
               </div>
             </div>
 
+            {generado.inventario ? (
+              <>
+                <section className="rejilla">
+                  <div className="indicador">
+                    <p className="indicador__etiqueta">Proyectos</p>
+                    <p className="indicador__valor">{generado.inventario.totales.proyectos}</p>
+                    <p className="indicador__detalle">{generado.inventario.totales.clientes} cliente(s)</p>
+                  </div>
+                  <div className="indicador">
+                    <p className="indicador__etiqueta">Grupos / inversores</p>
+                    <p className="indicador__valor">
+                      {generado.inventario.totales.grupos} / {generado.inventario.totales.inversores}
+                    </p>
+                    <p className="indicador__detalle">
+                      {numero(generado.inventario.totales.paneles, 0)} paneles instalados
+                    </p>
+                  </div>
+                  <div className="indicador">
+                    <p className="indicador__etiqueta">Potencia instalada</p>
+                    <p className="indicador__valor">{numero(generado.inventario.totales.potencia_kwp, 2)} kWp</p>
+                  </div>
+                  <div className="indicador">
+                    <p className="indicador__etiqueta">Produccion del periodo</p>
+                    <p className="indicador__valor">{kwh(generado.inventario.totales.produccion_kwh)}</p>
+                  </div>
+                  <div
+                    className={
+                      generado.inventario.totales.pendientes > 0
+                        ? 'indicador indicador--ambar'
+                        : 'indicador indicador--verde'
+                    }
+                  >
+                    <p className="indicador__etiqueta">Valor total del periodo</p>
+                    <p className="indicador__valor">{quetzales(generado.inventario.totales.valor_q)}</p>
+                    <p className="indicador__detalle">
+                      {generado.inventario.totales.pendientes > 0
+                        ? `${generado.inventario.totales.pendientes} registro(s) sin tarifa: monto parcial`
+                        : 'Monto definitivo'}
+                    </p>
+                  </div>
+                </section>
+
+                <div className="tabla-envoltura">
+                  <table>
+                    <caption>
+                      Un proyecto por fila, agrupado por cliente. La ultima fila es el total para gerencia.
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Cliente</th>
+                        <th scope="col">Proyecto</th>
+                        <th scope="col" className="num">Grupos</th>
+                        <th scope="col" className="num">Inversores</th>
+                        <th scope="col" className="num">Paneles</th>
+                        <th scope="col" className="num">Potencia kWp</th>
+                        <th scope="col" className="num">Produccion kWh</th>
+                        <th scope="col" className="num">Valor Q</th>
+                        <th scope="col">Modalidad</th>
+                        <th scope="col">Suministradora</th>
+                        <th scope="col">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {generado.inventario.filas.map((f) => (
+                        <tr key={f.id_proyecto}>
+                          <td>{f.cliente}</td>
+                          <th scope="row" style={{ position: 'static', background: 'transparent' }}>{f.proyecto}</th>
+                          <td className="num">{f.grupos}</td>
+                          <td className="num">{f.inversores}</td>
+                          <td className="num">{numero(f.paneles, 0)}</td>
+                          <td className="num">{numero(f.potencia_kwp, 2)}</td>
+                          <td className="num">{numero(f.produccion_kwh, 2)}</td>
+                          <td className="num">
+                            {quetzales(f.valor_q)}
+                            {f.pendientes > 0 ? (
+                              <span className="etiqueta etiqueta--ambar" style={{ marginLeft: '0.3rem' }}>
+                                {f.pendientes} sin tarifa
+                              </span>
+                            ) : null}
+                          </td>
+                          <td>{f.modalidad}</td>
+                          <td>
+                            {f.suministradora === 'DISTRIBUIDORA'
+                              ? 'Distribuidora'
+                              : f.suministradora === 'COMERCIALIZADORA'
+                                ? 'Comercializadora'
+                                : '—'}
+                            {f.tipo_tarifa ? ` · ${f.tipo_tarifa}` : ''}
+                          </td>
+                          <td>
+                            <span className={f.estado === 'Activo' ? 'etiqueta etiqueta--verde' : 'etiqueta etiqueta--gris'}>
+                              {f.estado}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="fila-total">
+                        <th scope="row" colSpan={2}>TOTAL</th>
+                        <td className="num">{generado.inventario.totales.grupos}</td>
+                        <td className="num">{generado.inventario.totales.inversores}</td>
+                        <td className="num">{numero(generado.inventario.totales.paneles, 0)}</td>
+                        <td className="num">{numero(generado.inventario.totales.potencia_kwp, 2)}</td>
+                        <td className="num">{numero(generado.inventario.totales.produccion_kwh, 2)}</td>
+                        <td className="num">{quetzales(generado.inventario.totales.valor_q)}</td>
+                        <td colSpan={3} />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <h3 style={{ marginTop: '1.4rem' }}>Notas</h3>
+                <ul style={{ fontSize: '0.85rem', lineHeight: 1.7, paddingLeft: '1.1rem' }}>
+                  {generado.notas.map((nota, indice) => (
+                    <li key={indice}>{nota}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <>
             <section className="rejilla">
               <div className="indicador">
                 <p className="indicador__etiqueta">Produccion total</p>
@@ -569,6 +675,8 @@ export function PaginaReportes() {
                 <li key={indice}>{nota}</li>
               ))}
             </ul>
+              </>
+            )}
           </section>
         </>
       ) : (

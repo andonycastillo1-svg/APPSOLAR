@@ -47,26 +47,45 @@ describe('Inventario de proyectos en Excel', () => {
     await cerrarTodo();
   });
 
-  const descargar = async (consulta = '') => {
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  /** Genera el reporte INVENTARIO y descarga su Excel. */
+  const generar = async (extra: Record<string, unknown> = {}) => {
+    const creado = await comoUsuario(operativo)
+      .post('/api/reports/generate')
+      .send({ tipo: 'INVENTARIO', desde: '2026-01-01', hasta: hoy, guardar: true, ...extra })
+      .expect(201);
     const r = await comoUsuario(operativo)
-      .get(`/api/reports/inventory/export${consulta}`)
+      .get(`/api/reports/${creado.body.datos.id_reporte}/export?formato=xlsx`)
       .buffer(true)
       .parse((res, cb) => {
         const trozos: Buffer[] = [];
         res.on('data', (t: Buffer) => trozos.push(t));
         res.on('end', () => cb(null, Buffer.concat(trozos)));
       });
-    return r;
-  };
-
-  it('genera un libro con resumen, proyectos, grupos, inversores, lotes y tarifas', async () => {
-    const r = await descargar();
-    expect(r.status).toBe(200);
-    expect(r.headers['content-type']).toContain('spreadsheetml');
-    expect(r.headers['content-disposition']).toContain('inventario_proyectos_');
-
     const libro = new ExcelJS.Workbook();
     await libro.xlsx.load(r.body as Buffer);
+    return { creado: creado.body.datos, libro, respuesta: r };
+  };
+
+  it('es un tipo de reporte: una fila por proyecto con cliente, grupos, inversores y total', async () => {
+    const { creado, libro, respuesta } = await generar();
+    expect(respuesta.status).toBe(200);
+    expect(respuesta.headers['content-type']).toContain('spreadsheetml');
+
+    // Lo que ve gerencia en pantalla
+    expect(creado.inventario.filas).toHaveLength(1);
+    const fila = creado.inventario.filas[0];
+    expect(fila.cliente).toBe('Cliente Pruebas');
+    expect(fila.proyecto).toBe('Planta Pruebas');
+    expect(fila.grupos).toBe(1);
+    expect(fila.inversores).toBe(2);
+    expect(fila.paneles).toBe(100);
+    expect(fila.produccion_kwh).toBeCloseTo(1250.5, 2);
+    expect(creado.inventario.totales.proyectos).toBe(1);
+    expect(creado.inventario.totales.inversores).toBe(2);
+
+    // Y en el Excel
     expect(libro.worksheets.map((h) => h.name)).toEqual([
       'Resumen',
       'Proyectos',
@@ -75,49 +94,50 @@ describe('Inventario de proyectos en Excel', () => {
       'Lotes de paneles',
       'Tarifas',
     ]);
-
-    const resumen = libro.getWorksheet('Resumen')!;
-    const textoResumen: string[] = [];
-    resumen.eachRow((fila) => textoResumen.push(fila.values!.toString()));
-    expect(textoResumen.join('\n')).toContain('Proyectos,1');
-    expect(textoResumen.join('\n')).toContain('Inversores,2');
-    expect(textoResumen.join('\n')).toContain('Paneles instalados');
-
     const proyectos = libro.getWorksheet('Proyectos')!;
-    // encabezado + 1 proyecto + fila de total
-    expect(proyectos.rowCount).toBe(3);
-    const fila = proyectos.getRow(2);
-    expect(fila.getCell(3).value).toBe('Planta Pruebas');
-    expect(fila.getCell(12).value).toBe(100);
-    expect(fila.getCell(13).value).toBe(55);
-    expect(Number(fila.getCell(14).value)).toBeCloseTo(1250.5, 3);
+    expect(proyectos.rowCount).toBe(3); // encabezado + proyecto + total
+    const datosFila = proyectos.getRow(2);
+    expect(datosFila.getCell(1).value).toBe('Cliente Pruebas');
+    expect(datosFila.getCell(2).value).toBe('Planta Pruebas');
+    expect(datosFila.getCell(3).value).toBe(1);
+    expect(datosFila.getCell(4).value).toBe(2);
+    expect(datosFila.getCell(5).value).toBe(100);
     const total = proyectos.getRow(3);
     expect(total.getCell(1).value).toBe('TOTAL');
-    expect(total.getCell(11).value).toBe(2);
-    expect(Number(total.getCell(14).value)).toBeCloseTo(1250.5, 3);
-
+    expect(total.getCell(4).value).toBe(2);
+    expect(Number(total.getCell(7).value)).toBeCloseTo(1250.5, 2);
     expect(libro.getWorksheet('Inversores')!.rowCount).toBe(3);
     expect(libro.getWorksheet('Grupos')!.rowCount).toBe(2);
+  });
+
+  it('se repite por cada proyecto y suma el total general', async () => {
+    const otro = await crearDatosBase('B');
+    await execute(
+      `INSERT INTO produccion (id_proyecto, id_grupo, id_inversor, fecha, anio, mes, kwh, granularidad,
+                               nivel_detalle, origen, secuencia, estado_valorizacion, activo)
+       VALUES (?, ?, ?, '2026-02-10', 2026, 2, 749.5, 'DIARIA', 'POR_INVERSOR', 'MANUAL', 1,
+               'PENDIENTE_DE_TARIFA', 1)`,
+      [otro.idProyecto, otro.idGrupo, otro.idInversor],
+    );
+    const { creado, libro } = await generar();
+    expect(creado.inventario.filas).toHaveLength(2);
+    expect(creado.inventario.totales.proyectos).toBe(2);
+    expect(creado.inventario.totales.produccion_kwh).toBeCloseTo(2000, 2);
+    const proyectos = libro.getWorksheet('Proyectos')!;
+    expect(proyectos.rowCount).toBe(4);
+    expect(Number(proyectos.getRow(4).getCell(7).value)).toBeCloseTo(2000, 2);
   });
 
   it('puede filtrarse por cliente y solo activos', async () => {
     const otro = await crearDatosBase('B');
     await execute('UPDATE proyectos SET activo = 0 WHERE id_proyecto = ?', [otro.idProyecto]);
 
-    const todos = new ExcelJS.Workbook();
-    await todos.xlsx.load((await descargar()).body as Buffer);
-    expect(todos.getWorksheet('Proyectos')!.rowCount).toBe(4); // 2 proyectos + encabezado + total
-
-    const activos = new ExcelJS.Workbook();
-    await activos.xlsx.load((await descargar('?solo_activos=1')).body as Buffer);
-    expect(activos.getWorksheet('Proyectos')!.rowCount).toBe(3);
-
-    const delCliente = new ExcelJS.Workbook();
-    await delCliente.xlsx.load((await descargar(`?id_cliente=${datos.idCliente}`)).body as Buffer);
-    expect(delCliente.getWorksheet('Proyectos')!.rowCount).toBe(3);
+    expect((await generar()).creado.inventario.filas).toHaveLength(2);
+    expect((await generar({ solo_activos: true })).creado.inventario.filas).toHaveLength(1);
+    expect((await generar({ id_cliente: datos.idCliente })).creado.inventario.filas).toHaveLength(1);
   });
 
   it('exige sesion', async () => {
-    await supertest(obtenerApp()).get('/api/reports/inventory/export').expect(401);
+    await supertest(obtenerApp()).post('/api/reports/generate').send({ tipo: 'INVENTARIO' }).expect(401);
   });
 });

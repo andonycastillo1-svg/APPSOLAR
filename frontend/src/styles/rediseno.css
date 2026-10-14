@@ -865,3 +865,12 @@ a:hover .icono--clientes, a:hover .icono--usuarios { animation: saltito 600ms ea
 }
 .inventario:hover .icono--descargar .i-bajar { animation: bajar 900ms ease infinite; }
 .inventario__acciones { display: flex; flex-wrap: wrap; gap: 0.8rem 1rem; align-items: end; }
+
+/* Fila de total (inventario de proyectos) */
+tfoot .fila-total th,
+tfoot .fila-total td {
+  background: color-mix(in srgb, var(--primario) 10%, var(--superficie));
+  font-weight: 750;
+  border-top: 2px solid var(--primario);
+  position: static;
+}

@@ -27,7 +27,7 @@ import { redondear } from '../../utils/numeros';
 export const reportesRouter = Router();
 reportesRouter.use(requiereAutenticacion);
 
-const TIPOS = ['PRODUCCION', 'RESUMEN_ANUAL', 'COMPARATIVO', 'VALORIZACION'] as const;
+const TIPOS = ['PRODUCCION', 'RESUMEN_ANUAL', 'COMPARATIVO', 'VALORIZACION', 'INVENTARIO'] as const;
 
 const esquemaGenerar = z.object({
   tipo: z.enum(TIPOS),
@@ -39,6 +39,8 @@ const esquemaGenerar = z.object({
   inversores: z.array(z.coerce.number().int().positive()).optional().nullable(),
   granularidad: z.enum(['DIARIA', 'MENSUAL', 'ANUAL']).default('MENSUAL'),
   anio: z.coerce.number().int().min(2000).max(2100).optional(),
+  /** Solo INVENTARIO: excluye los proyectos inactivos. */
+  solo_activos: z.boolean().default(false),
   guardar: z.boolean().default(true),
 });
 
@@ -54,6 +56,337 @@ const formatoNumero = (valor: number | null | undefined, decimales = 2): string 
 
 const formatoQ = (valor: number | null | undefined): string =>
   valor === null || valor === undefined ? 'Pendiente de tarifa' : `Q ${formatoNumero(valor, 2)}`;
+
+
+// ---------------------------------------------------------------------------
+// Inventario (stock) de proyectos
+//
+// Una fila por proyecto con su cliente, cantidad de grupos e inversores,
+// paneles, potencia, produccion y valor; al final una fila de TOTAL para
+// que gerencia obtenga el monto global. La produccion respeta la
+// precedencia de niveles (sin doble conteo) dentro del periodo del reporte.
+// ---------------------------------------------------------------------------
+async function calcularInventario(opciones: {
+  desde: string;
+  hasta: string;
+  idCliente?: number | null;
+  idProyecto?: number | null;
+  soloActivos: boolean;
+}) {
+  const condiciones = ['1 = 1'];
+  const params: unknown[] = [];
+  if (opciones.idCliente) {
+    condiciones.push('pr.id_cliente = ?');
+    params.push(opciones.idCliente);
+  }
+  if (opciones.idProyecto) {
+    condiciones.push('pr.id_proyecto = ?');
+    params.push(opciones.idProyecto);
+  }
+  if (opciones.soloActivos) condiciones.push('pr.activo = 1');
+  const donde = condiciones.join(' AND ');
+
+  const proyectos = await query<{
+    id_proyecto: number;
+    proyecto: string;
+    cliente: string;
+    nit: string;
+    ubicacion: string | null;
+    tipo_proyecto: string;
+    suministradora: string | null;
+    tipo_tarifa: string | null;
+    valor_pactado_kwh: number | null;
+    capacidad_kwp: number | null;
+    fecha_inicio: string | null;
+    activo: number;
+  }>(
+    `SELECT pr.id_proyecto, pr.nombre AS proyecto, c.nombre AS cliente, c.nit, pr.ubicacion,
+            pr.tipo_proyecto, pr.suministradora, tt.sigla AS tipo_tarifa, pr.valor_pactado_kwh,
+            pr.capacidad_kwp, pr.fecha_inicio, pr.activo
+       FROM proyectos pr
+       JOIN clientes c ON c.id_cliente = pr.id_cliente
+       LEFT JOIN tipos_tarifa tt ON tt.id_tipo_tarifa = pr.id_tipo_tarifa
+      WHERE ${donde}
+      ORDER BY c.nombre, pr.nombre`,
+    params,
+  );
+  const ids = proyectos.map((p) => p.id_proyecto);
+  const enLista = ids.length ? ids.map(() => '?').join(',') : 'NULL';
+
+  const grupos = await query<{
+    id_grupo: number;
+    id_proyecto: number;
+    grupo: string;
+    cantidad_inversores_declarada: number | null;
+    inversores_registrados: number;
+    tiene_banco_baterias: number;
+    capacidad_baterias_kwh: number | null;
+    capacidad_kwp: number | null;
+    cantidad_paneles: number;
+    capacidad_paneles_kwp: number;
+    origen_paneles: string;
+    activo: number;
+  }>(
+    `SELECT g.id_grupo, g.id_proyecto, g.nombre AS grupo, g.cantidad_inversores_declarada,
+            (SELECT COUNT(*) FROM inversores i WHERE i.id_grupo = g.id_grupo AND i.activo = 1) AS inversores_registrados,
+            g.tiene_banco_baterias, g.capacidad_baterias_kwh, g.capacidad_kwp, g.activo,
+            ${SUBCONSULTA_PANELES}
+       FROM grupos g WHERE g.id_proyecto IN (${enLista}) ORDER BY g.id_proyecto, g.nombre`,
+    ids,
+  );
+
+  const inversores = await query<{
+    id_inversor: number;
+    id_proyecto: number;
+    id_grupo: number;
+    marca: string;
+    modelo: string;
+    tipo_conexion: string;
+    serial_externo: string | null;
+    capacidad_kwp: number | null;
+    cantidad_paneles: number | null;
+    potencia_panel_wp: number | null;
+    estado: string;
+    activo: number;
+  }>(
+    `SELECT id_inversor, id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo,
+            capacidad_kwp, cantidad_paneles, potencia_panel_wp, estado, activo
+       FROM inversores WHERE id_proyecto IN (${enLista}) ORDER BY id_proyecto, id_grupo, marca, modelo`,
+    ids,
+  );
+
+  const lotes = await query<{
+    id_proyecto: number;
+    grupo: string;
+    cantidad: number;
+    potencia_wp: number;
+    marca: string | null;
+    modelo: string | null;
+    fecha_instalacion: string | null;
+  }>(
+    `SELECT g.id_proyecto, g.nombre AS grupo, l.cantidad, l.potencia_wp, l.marca, l.modelo, l.fecha_instalacion
+       FROM paneles_grupo l JOIN grupos g ON g.id_grupo = l.id_grupo
+      WHERE l.activo = 1 AND g.id_proyecto IN (${enLista})
+      ORDER BY g.id_proyecto, g.nombre, l.fecha_instalacion`,
+    ids,
+  );
+
+  const filtroProduccion = {
+    desde: opciones.desde,
+    hasta: opciones.hasta,
+    idCliente: opciones.idCliente ?? null,
+    idProyecto: opciones.idProyecto ?? null,
+  };
+  const produccionProyecto = new Map(
+    (await consultas.porProyecto(filtroProduccion)).map((p) => [p.id_proyecto, p]),
+  );
+  const produccionGrupo = new Map((await consultas.porGrupo(filtroProduccion)).map((g) => [g.id_grupo, g]));
+  const produccionInversor = new Map(
+    (await consultas.porInversor(filtroProduccion)).map((i) => [i.id_inversor, i]),
+  );
+
+  const tarifas = await query<{
+    id_proyecto: number;
+    anio: number;
+    trimestre: number;
+    costo_kwh: number;
+    estado: string;
+    origen: string;
+  }>(
+    `SELECT t.id_proyecto, t.anio, t.trimestre, t.costo_kwh, t.estado, t.origen
+       FROM tarifas_kwh t
+      WHERE t.estado <> 'ANULADA' AND t.id_proyecto IN (${enLista})
+      ORDER BY t.id_proyecto, t.anio DESC, t.trimestre DESC`,
+    ids,
+  );
+
+  const nombreProyecto = new Map(proyectos.map((p) => [p.id_proyecto, p.proyecto]));
+  const nombreGrupo = new Map(grupos.map((g) => [g.id_grupo, g.grupo]));
+  const gruposDe = (id: number) => grupos.filter((g) => g.id_proyecto === id && g.activo);
+  const inversoresDe = (id: number) => inversores.filter((i) => i.id_proyecto === id && i.activo);
+
+  const filas = proyectos.map((p) => {
+    const gs = gruposDe(p.id_proyecto);
+    const prod = produccionProyecto.get(p.id_proyecto);
+    return {
+      id_proyecto: p.id_proyecto,
+      cliente: p.cliente,
+      nit: p.nit,
+      proyecto: p.proyecto,
+      ubicacion: p.ubicacion ?? '',
+      modalidad: p.tipo_proyecto,
+      suministradora: p.suministradora ?? '',
+      tipo_tarifa: p.tipo_tarifa ?? '',
+      valor_pactado: p.valor_pactado_kwh === null ? null : Number(p.valor_pactado_kwh),
+      potencia_kwp: Number(p.capacidad_kwp ?? 0),
+      grupos: gs.length,
+      inversores: inversoresDe(p.id_proyecto).length,
+      paneles: gs.reduce((a, g) => a + Number(g.cantidad_paneles), 0),
+      potencia_paneles_kwp: redondear(gs.reduce((a, g) => a + Number(g.capacidad_paneles_kwp), 0), 3),
+      produccion_kwh: redondear(Number(prod?.kwh ?? 0), 2),
+      valor_q: redondear(Number(prod?.valor_q ?? 0), 2),
+      pendientes: Number(prod?.pendientes ?? 0),
+      inicio: p.fecha_inicio ? String(p.fecha_inicio).slice(0, 10) : '',
+      estado: p.activo ? 'Activo' : 'Inactivo',
+    };
+  });
+
+  const suma = (clave: 'potencia_kwp' | 'potencia_paneles_kwp' | 'produccion_kwh' | 'valor_q') =>
+    redondear(filas.reduce((a, f) => a + f[clave], 0), 2);
+  const totales = {
+    clientes: new Set(proyectos.map((p) => p.nit)).size,
+    proyectos: filas.length,
+    grupos: filas.reduce((a, f) => a + f.grupos, 0),
+    inversores: filas.reduce((a, f) => a + f.inversores, 0),
+    paneles: filas.reduce((a, f) => a + f.paneles, 0),
+    potencia_kwp: suma('potencia_kwp'),
+    potencia_paneles_kwp: suma('potencia_paneles_kwp'),
+    produccion_kwh: suma('produccion_kwh'),
+    valor_q: suma('valor_q'),
+    pendientes: filas.reduce((a, f) => a + f.pendientes, 0),
+  };
+
+  const tablas: TablaReporte[] = [
+    {
+      titulo: 'Proyectos',
+      columnas: [
+        { clave: 'cliente', titulo: 'Cliente', ancho: 30 },
+        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
+        { clave: 'grupos', titulo: 'Grupos', ancho: 9, alineacion: 'right' },
+        { clave: 'inversores', titulo: 'Inversores', ancho: 11, alineacion: 'right' },
+        { clave: 'paneles', titulo: 'Paneles', ancho: 10, alineacion: 'right' },
+        { clave: 'potencia_kwp', titulo: 'Potencia (kWp)', ancho: 15, alineacion: 'right' },
+        { clave: 'produccion_kwh', titulo: 'Produccion (kWh)', ancho: 18, alineacion: 'right' },
+        { clave: 'valor_q', titulo: 'Valor (Q)', ancho: 16, alineacion: 'right' },
+        { clave: 'pendientes', titulo: 'Sin tarifa', ancho: 11, alineacion: 'right' },
+        { clave: 'modalidad', titulo: 'Modalidad', ancho: 11 },
+        { clave: 'suministradora', titulo: 'Suministradora', ancho: 18 },
+        { clave: 'tipo_tarifa', titulo: 'Tipo de tarifa', ancho: 13 },
+        { clave: 'valor_pactado', titulo: 'Valor pactado (Q/kWh)', ancho: 20, alineacion: 'right' },
+        { clave: 'nit', titulo: 'NIT', ancho: 14 },
+        { clave: 'ubicacion', titulo: 'Ubicacion', ancho: 26 },
+        { clave: 'inicio', titulo: 'Inicio de operacion', ancho: 18 },
+        { clave: 'estado', titulo: 'Estado', ancho: 10 },
+      ],
+      filas: [
+        ...filas.map((f) => ({ ...f, valor_pactado: f.valor_pactado ?? '' })),
+        {
+          cliente: 'TOTAL',
+          proyecto: `${totales.proyectos} proyecto(s)`,
+          grupos: totales.grupos,
+          inversores: totales.inversores,
+          paneles: totales.paneles,
+          potencia_kwp: totales.potencia_kwp,
+          produccion_kwh: totales.produccion_kwh,
+          valor_q: totales.valor_q,
+          pendientes: totales.pendientes,
+        },
+      ],
+    },
+    {
+      titulo: 'Grupos',
+      columnas: [
+        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
+        { clave: 'grupo', titulo: 'Grupo', ancho: 26 },
+        { clave: 'declarados', titulo: 'Inversores declarados', ancho: 20 },
+        { clave: 'registrados', titulo: 'Inversores registrados', ancho: 21 },
+        { clave: 'baterias', titulo: 'Banco de baterias', ancho: 17 },
+        { clave: 'baterias_kwh', titulo: 'Baterias (kWh)', ancho: 15 },
+        { clave: 'potencia_kwp', titulo: 'Potencia (kWp)', ancho: 15 },
+        { clave: 'paneles', titulo: 'Paneles', ancho: 10 },
+        { clave: 'origen_paneles', titulo: 'Origen de paneles', ancho: 17 },
+        { clave: 'produccion_kwh', titulo: 'Produccion (kWh)', ancho: 18 },
+        { clave: 'estado', titulo: 'Estado', ancho: 10 },
+      ],
+      filas: grupos.map((g) => ({
+        proyecto: nombreProyecto.get(g.id_proyecto) ?? '',
+        grupo: g.grupo,
+        declarados: g.cantidad_inversores_declarada ?? '',
+        registrados: Number(g.inversores_registrados),
+        baterias: g.tiene_banco_baterias ? 'Si' : 'No',
+        baterias_kwh: g.capacidad_baterias_kwh === null ? '' : Number(g.capacidad_baterias_kwh),
+        potencia_kwp: g.capacidad_kwp === null ? '' : Number(g.capacidad_kwp),
+        paneles: Number(g.cantidad_paneles),
+        origen_paneles: g.origen_paneles === 'INVERSORES' ? 'Inversores' : 'Lotes del grupo',
+        produccion_kwh: redondear(Number(produccionGrupo.get(g.id_grupo)?.kwh ?? 0), 2),
+        estado: g.activo ? 'Activo' : 'Inactivo',
+      })),
+    },
+    {
+      titulo: 'Inversores',
+      columnas: [
+        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
+        { clave: 'grupo', titulo: 'Grupo', ancho: 24 },
+        { clave: 'marca', titulo: 'Marca', ancho: 14 },
+        { clave: 'modelo', titulo: 'Modelo', ancho: 22 },
+        { clave: 'conexion', titulo: 'Conexion', ancho: 13 },
+        { clave: 'serie', titulo: 'Numero de serie', ancho: 22 },
+        { clave: 'potencia_kwp', titulo: 'Potencia (kWp)', ancho: 15 },
+        { clave: 'paneles', titulo: 'Paneles', ancho: 10 },
+        { clave: 'wp_panel', titulo: 'Wp por panel', ancho: 14 },
+        { clave: 'produccion_kwh', titulo: 'Produccion (kWh)', ancho: 18 },
+        { clave: 'estado', titulo: 'Estado', ancho: 15 },
+      ],
+      filas: inversores.map((i) => ({
+        proyecto: nombreProyecto.get(i.id_proyecto) ?? '',
+        grupo: nombreGrupo.get(i.id_grupo) ?? '',
+        marca: i.marca,
+        modelo: i.modelo,
+        conexion: i.tipo_conexion,
+        serie: i.serial_externo ?? '',
+        potencia_kwp: i.capacidad_kwp === null ? '' : Number(i.capacidad_kwp),
+        paneles: i.cantidad_paneles ?? '',
+        wp_panel: i.potencia_panel_wp === null ? '' : Number(i.potencia_panel_wp),
+        produccion_kwh: redondear(Number(produccionInversor.get(i.id_inversor)?.kwh ?? 0), 2),
+        estado: i.activo ? i.estado : 'INACTIVO',
+      })),
+    },
+    {
+      titulo: 'Lotes de paneles',
+      columnas: [
+        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
+        { clave: 'grupo', titulo: 'Grupo', ancho: 24 },
+        { clave: 'cantidad', titulo: 'Cantidad', ancho: 11 },
+        { clave: 'wp', titulo: 'Wp por panel', ancho: 14 },
+        { clave: 'kwp', titulo: 'Potencia (kWp)', ancho: 15 },
+        { clave: 'marca', titulo: 'Marca', ancho: 16 },
+        { clave: 'modelo', titulo: 'Modelo', ancho: 20 },
+        { clave: 'fecha', titulo: 'Instalacion', ancho: 14 },
+      ],
+      filas: lotes.map((l) => ({
+        proyecto: nombreProyecto.get(l.id_proyecto) ?? '',
+        grupo: l.grupo,
+        cantidad: Number(l.cantidad),
+        wp: Number(l.potencia_wp),
+        kwp: redondear((Number(l.cantidad) * Number(l.potencia_wp)) / 1000, 3),
+        marca: l.marca ?? '',
+        modelo: l.modelo ?? '',
+        fecha: l.fecha_instalacion ? String(l.fecha_instalacion).slice(0, 10) : '',
+      })),
+    },
+    {
+      titulo: 'Tarifas',
+      columnas: [
+        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
+        { clave: 'anio', titulo: 'Anio tarifario', ancho: 14 },
+        { clave: 'trimestre', titulo: 'Trimestre', ancho: 12 },
+        { clave: 'costo', titulo: 'Tarifa (Q/kWh)', ancho: 15 },
+        { clave: 'estado', titulo: 'Estado', ancho: 13 },
+        { clave: 'origen', titulo: 'Origen', ancho: 20 },
+      ],
+      filas: tarifas.map((t) => ({
+        proyecto: nombreProyecto.get(t.id_proyecto) ?? '',
+        anio: t.anio,
+        trimestre: ['I', 'II', 'III', 'IV'][t.trimestre - 1] ?? String(t.trimestre),
+        costo: Number(t.costo_kwh),
+        estado: t.estado,
+        origen: t.origen,
+      })),
+    },
+  ];
+
+  return { filas, totales, tablas };
+}
 
 /** Construye el contenido completo del reporte a partir de sus parametros. */
 async function construirReporte(parametros: ParametrosReporte, usuario: string) {
@@ -113,6 +446,17 @@ async function construirReporte(parametros: ParametrosReporte, usuario: string) 
       estado: f.pendiente_de_tarifa ? 'PENDIENTE DE TARIFA' : 'VALORIZADO',
     }));
 
+  const inventario =
+    parametros.tipo === 'INVENTARIO'
+      ? await calcularInventario({
+          desde: parametros.desde,
+          hasta: parametros.hasta,
+          idCliente: filtros.idCliente,
+          idProyecto: filtros.idProyecto,
+          soloActivos: parametros.solo_activos,
+        })
+      : null;
+
   const promedioDiario =
     serie.length > 0 ? redondear(resumen.kwh / Math.max(1, serie.length), 4) : 0;
 
@@ -121,6 +465,12 @@ async function construirReporte(parametros: ParametrosReporte, usuario: string) 
     `Ultima actualizacion de datos en el periodo: ${resumen.ultimaFecha ? formatoLargoEs(resumen.ultimaFecha) : 'sin registros'}.`,
     'La tarifa del kWh tiene vigencia TRIMESTRAL. El valor economico se calcula registro por registro con la tarifa aprobada del trimestre correspondiente y luego se suma.',
     'Para evitar doble conteo, cuando un proyecto tiene detalle por inversor en un mes, el consolidado de ese mes no se suma.',
+    ...(parametros.tipo === 'INVENTARIO'
+      ? [
+          'Inventario: la produccion y el valor corresponden al periodo seleccionado; grupos, inversores y paneles son los vigentes hoy.',
+          'Los paneles de un grupo salen de sus inversores; si ninguno los tiene registrados, de los lotes del grupo.',
+        ]
+      : []),
   ];
 
   if (!cobertura.completa) {
@@ -153,6 +503,7 @@ async function construirReporte(parametros: ParametrosReporte, usuario: string) 
     cobertura,
     resumenAnual: anual,
     desgloseMensual,
+    inventario,
     notas,
     generadoEn: new Date().toISOString(),
     moneda: 'GTQ',
@@ -164,6 +515,9 @@ async function construirReporte(parametros: ParametrosReporte, usuario: string) 
 type Reporte = Awaited<ReturnType<typeof construirReporte>>;
 
 function tablasDelReporte(reporte: Reporte): TablaReporte[] {
+  // Inventario: el libro es el propio stock (proyectos, grupos, inversores...).
+  if (reporte.inventario) return reporte.inventario.tablas;
+
   const tablas: TablaReporte[] = [];
 
   tablas.push({
@@ -250,6 +604,23 @@ function tablasDelReporte(reporte: Reporte): TablaReporte[] {
 }
 
 function indicadoresDelReporte(reporte: Reporte) {
+  if (reporte.inventario) {
+    const t = reporte.inventario.totales;
+    return [
+      { etiqueta: 'Clientes', valor: String(t.clientes) },
+      { etiqueta: 'Proyectos', valor: String(t.proyectos) },
+      { etiqueta: 'Grupos', valor: String(t.grupos) },
+      { etiqueta: 'Inversores', valor: String(t.inversores) },
+      { etiqueta: 'Paneles instalados', valor: formatoNumero(t.paneles, 0) },
+      { etiqueta: 'Potencia instalada total', valor: `${formatoNumero(t.potencia_kwp, 2)} kWp` },
+      { etiqueta: 'Produccion del periodo', valor: `${formatoNumero(t.produccion_kwh, 2)} kWh` },
+      {
+        etiqueta: 'Valor total del periodo',
+        valor: formatoQ(t.valor_q),
+        detalle: t.pendientes > 0 ? `${t.pendientes} registro(s) sin tarifa: monto parcial` : undefined,
+      },
+    ];
+  }
   const cumplimiento = reporte.resumenAnual.totales.cumplimiento_anio_seleccionado;
   return [
     { etiqueta: 'Produccion total del periodo', valor: `${formatoNumero(reporte.resumen.kwh)} kWh` },
@@ -285,7 +656,10 @@ function indicadoresDelReporte(reporte: Reporte) {
 
 function encabezadoDelReporte(reporte: Reporte) {
   return {
-    titulo: `Reporte de ${reporte.parametros.tipo.toLowerCase().replace('_', ' ')}`,
+    titulo:
+      reporte.parametros.tipo === 'INVENTARIO'
+        ? 'Inventario de proyectos'
+        : `Reporte de ${reporte.parametros.tipo.toLowerCase().replace('_', ' ')}`,
     subtitulo: `${reporte.contexto.proyecto} | ${reporte.contexto.cliente}`,
     empresa: reporte.empresa,
     usuario: reporte.usuario,
@@ -356,6 +730,9 @@ reportesRouter.post(
     creado(res, {
       id_reporte: idReporte,
       ...reporte,
+      inventario: reporte.inventario
+        ? { filas: reporte.inventario.filas, totales: reporte.inventario.totales }
+        : null,
       advertenciaOficial: reporte.cobertura.completa
         ? null
         : `Este reporte NO puede considerarse un documento oficial completo: hay ${reporte.cobertura.trimestresPendientes.length} mes(es) sin tarifa aprobada, por lo que el monto en quetzales es parcial.`,
@@ -397,394 +774,6 @@ reportesRouter.get(
       params,
     );
     ok(res, filas, metaPaginacion(p, total?.total ?? 0));
-  }),
-);
-
-// ---------------------------------------------------------------------------
-// GET /reports/inventory/export?id_cliente=&solo_activos=1
-//
-// Inventario (stock) de proyectos en Excel: cuantos proyectos, grupos,
-// inversores y paneles hay en total, y todo lo que lleva cada proyecto.
-// La produccion acumulada respeta la precedencia de niveles (sin doble conteo).
-// ---------------------------------------------------------------------------
-reportesRouter.get(
-  '/inventory/export',
-  requierePermiso(PERMISOS.REPORTES_EXPORTAR),
-  validarConsulta(
-    z.object({
-      id_cliente: z.coerce.number().int().positive().optional(),
-      solo_activos: z.enum(['1', '0']).default('0'),
-    }),
-  ),
-  asyncHandler(async (req, res) => {
-    const { id_cliente: idCliente, solo_activos: soloActivos } = consulta<{
-      id_cliente?: number;
-      solo_activos: '1' | '0';
-    }>(req);
-
-    const condiciones = ['1 = 1'];
-    const params: unknown[] = [];
-    if (idCliente) {
-      condiciones.push('pr.id_cliente = ?');
-      params.push(idCliente);
-    }
-    if (soloActivos === '1') condiciones.push('pr.activo = 1');
-    const donde = condiciones.join(' AND ');
-
-    const proyectos = await query<{
-      id_proyecto: number;
-      proyecto: string;
-      cliente: string;
-      nit: string;
-      ubicacion: string | null;
-      tipo_proyecto: string;
-      suministradora: string | null;
-      tipo_tarifa: string | null;
-      valor_pactado_kwh: number | null;
-      capacidad_kwp: number | null;
-      fecha_inicio: string | null;
-      activo: number;
-    }>(
-      `SELECT pr.id_proyecto, pr.nombre AS proyecto, c.nombre AS cliente, c.nit, pr.ubicacion,
-              pr.tipo_proyecto, pr.suministradora, tt.sigla AS tipo_tarifa, pr.valor_pactado_kwh,
-              pr.capacidad_kwp, pr.fecha_inicio, pr.activo
-         FROM proyectos pr
-         JOIN clientes c ON c.id_cliente = pr.id_cliente
-         LEFT JOIN tipos_tarifa tt ON tt.id_tipo_tarifa = pr.id_tipo_tarifa
-        WHERE ${donde}
-        ORDER BY c.nombre, pr.nombre`,
-      params,
-    );
-    const ids = proyectos.map((p) => p.id_proyecto);
-    const enLista = ids.length ? ids.map(() => '?').join(',') : 'NULL';
-
-    const grupos = await query<{
-      id_grupo: number;
-      id_proyecto: number;
-      grupo: string;
-      cantidad_inversores_declarada: number | null;
-      inversores_registrados: number;
-      tiene_banco_baterias: number;
-      capacidad_baterias_kwh: number | null;
-      capacidad_kwp: number | null;
-      cantidad_paneles: number;
-      capacidad_paneles_kwp: number;
-      origen_paneles: string;
-      activo: number;
-    }>(
-      `SELECT g.id_grupo, g.id_proyecto, g.nombre AS grupo, g.cantidad_inversores_declarada,
-              (SELECT COUNT(*) FROM inversores i WHERE i.id_grupo = g.id_grupo AND i.activo = 1) AS inversores_registrados,
-              g.tiene_banco_baterias, g.capacidad_baterias_kwh, g.capacidad_kwp, g.activo,
-              ${SUBCONSULTA_PANELES}
-         FROM grupos g WHERE g.id_proyecto IN (${enLista}) ORDER BY g.id_proyecto, g.nombre`,
-      ids,
-    );
-
-    const inversores = await query<{
-      id_inversor: number;
-      id_proyecto: number;
-      id_grupo: number;
-      marca: string;
-      modelo: string;
-      tipo_conexion: string;
-      serial_externo: string | null;
-      capacidad_kwp: number | null;
-      cantidad_paneles: number | null;
-      potencia_panel_wp: number | null;
-      estado: string;
-      activo: number;
-    }>(
-      `SELECT id_inversor, id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo,
-              capacidad_kwp, cantidad_paneles, potencia_panel_wp, estado, activo
-         FROM inversores WHERE id_proyecto IN (${enLista}) ORDER BY id_proyecto, id_grupo, marca, modelo`,
-      ids,
-    );
-
-    const lotes = await query<{
-      id_proyecto: number;
-      grupo: string;
-      cantidad: number;
-      potencia_wp: number;
-      marca: string | null;
-      modelo: string | null;
-      fecha_instalacion: string | null;
-    }>(
-      `SELECT g.id_proyecto, g.nombre AS grupo, l.cantidad, l.potencia_wp, l.marca, l.modelo, l.fecha_instalacion
-         FROM paneles_grupo l JOIN grupos g ON g.id_grupo = l.id_grupo
-        WHERE l.activo = 1 AND g.id_proyecto IN (${enLista})
-        ORDER BY g.id_proyecto, g.nombre, l.fecha_instalacion`,
-      ids,
-    );
-
-    // Produccion acumulada sin doble conteo, por proyecto y por grupo.
-    const filtroProduccion = { desde: '2000-01-01', hasta: hoyISO(), idCliente: idCliente ?? null };
-    const produccionProyecto = new Map(
-      (await consultas.porProyecto(filtroProduccion)).map((p) => [p.id_proyecto, p]),
-    );
-    const produccionGrupo = new Map(
-      (await consultas.porGrupo(filtroProduccion)).map((g) => [g.id_grupo, g]),
-    );
-    const produccionInversor = new Map(
-      (await consultas.porInversor(filtroProduccion)).map((i) => [i.id_inversor, i]),
-    );
-
-    const tarifasVigentes = await query<{
-      id_proyecto: number;
-      anio: number;
-      trimestre: number;
-      costo_kwh: number;
-      estado: string;
-      origen: string;
-    }>(
-      `SELECT t.id_proyecto, t.anio, t.trimestre, t.costo_kwh, t.estado, t.origen
-         FROM tarifas_kwh t
-        WHERE t.estado <> 'ANULADA' AND t.id_proyecto IN (${enLista})
-        ORDER BY t.id_proyecto, t.anio DESC, t.trimestre DESC`,
-      ids,
-    );
-
-    const nombreProyecto = new Map(proyectos.map((p) => [p.id_proyecto, p.proyecto]));
-    const nombreGrupo = new Map(grupos.map((g) => [g.id_grupo, g.grupo]));
-    const gruposDe = (id: number) => grupos.filter((g) => g.id_proyecto === id && g.activo);
-    const inversoresDe = (id: number) => inversores.filter((i) => i.id_proyecto === id && i.activo);
-
-    const filasProyectos = proyectos.map((p) => {
-      const gs = gruposDe(p.id_proyecto);
-      const prod = produccionProyecto.get(p.id_proyecto);
-      return {
-        cliente: p.cliente,
-        nit: p.nit,
-        proyecto: p.proyecto,
-        ubicacion: p.ubicacion ?? '',
-        modalidad: p.tipo_proyecto,
-        suministradora: p.suministradora ?? '',
-        tipo_tarifa: p.tipo_tarifa ?? '',
-        valor_pactado: p.valor_pactado_kwh === null ? '' : Number(p.valor_pactado_kwh),
-        potencia_kwp: Number(p.capacidad_kwp ?? 0),
-        grupos: gs.length,
-        inversores: inversoresDe(p.id_proyecto).length,
-        paneles: gs.reduce((a, g) => a + Number(g.cantidad_paneles), 0),
-        potencia_paneles_kwp: redondear(gs.reduce((a, g) => a + Number(g.capacidad_paneles_kwp), 0), 3),
-        produccion_kwh: Number(prod?.kwh ?? 0),
-        valor_q: Number(prod?.valor_q ?? 0),
-        pendientes: Number(prod?.pendientes ?? 0),
-        inicio: p.fecha_inicio ? String(p.fecha_inicio).slice(0, 10) : '',
-        estado: p.activo ? 'Activo' : 'Inactivo',
-      };
-    });
-
-    const suma = (clave: keyof (typeof filasProyectos)[number]) =>
-      redondear(filasProyectos.reduce((a, f) => a + Number(f[clave] || 0), 0), 4);
-    const totales = {
-      clientes: new Set(proyectos.map((p) => p.nit)).size,
-      proyectos: proyectos.length,
-      grupos: filasProyectos.reduce((a, f) => a + f.grupos, 0),
-      inversores: filasProyectos.reduce((a, f) => a + f.inversores, 0),
-      paneles: filasProyectos.reduce((a, f) => a + f.paneles, 0),
-      potencia: suma('potencia_kwp'),
-      potenciaPaneles: suma('potencia_paneles_kwp'),
-      kwh: suma('produccion_kwh'),
-      valor: suma('valor_q'),
-      pendientes: filasProyectos.reduce((a, f) => a + f.pendientes, 0),
-    };
-
-    const tablaProyectos: TablaReporte = {
-      titulo: 'Proyectos',
-      columnas: [
-        { clave: 'cliente', titulo: 'Cliente', ancho: 30 },
-        { clave: 'nit', titulo: 'NIT', ancho: 14 },
-        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
-        { clave: 'ubicacion', titulo: 'Ubicacion', ancho: 26 },
-        { clave: 'modalidad', titulo: 'Modalidad', ancho: 11 },
-        { clave: 'suministradora', titulo: 'Suministradora', ancho: 18 },
-        { clave: 'tipo_tarifa', titulo: 'Tipo de tarifa', ancho: 13 },
-        { clave: 'valor_pactado', titulo: 'Valor pactado (Q/kWh)', ancho: 20 },
-        { clave: 'potencia_kwp', titulo: 'Potencia (kWp)', ancho: 15 },
-        { clave: 'grupos', titulo: 'Grupos', ancho: 9 },
-        { clave: 'inversores', titulo: 'Inversores', ancho: 11 },
-        { clave: 'paneles', titulo: 'Paneles', ancho: 10 },
-        { clave: 'potencia_paneles_kwp', titulo: 'Potencia paneles (kWp)', ancho: 21 },
-        { clave: 'produccion_kwh', titulo: 'Produccion acumulada (kWh)', ancho: 25 },
-        { clave: 'valor_q', titulo: 'Valor acumulado (Q)', ancho: 19 },
-        { clave: 'pendientes', titulo: 'Registros sin tarifa', ancho: 18 },
-        { clave: 'inicio', titulo: 'Inicio de operacion', ancho: 18 },
-        { clave: 'estado', titulo: 'Estado', ancho: 10 },
-      ],
-      filas: [
-        ...filasProyectos,
-        {
-          cliente: 'TOTAL',
-          proyecto: `${totales.proyectos} proyecto(s)`,
-          potencia_kwp: totales.potencia,
-          grupos: totales.grupos,
-          inversores: totales.inversores,
-          paneles: totales.paneles,
-          potencia_paneles_kwp: totales.potenciaPaneles,
-          produccion_kwh: totales.kwh,
-          valor_q: totales.valor,
-          pendientes: totales.pendientes,
-        },
-      ],
-    };
-
-    const tablaGrupos: TablaReporte = {
-      titulo: 'Grupos',
-      columnas: [
-        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
-        { clave: 'grupo', titulo: 'Grupo', ancho: 26 },
-        { clave: 'declarados', titulo: 'Inversores declarados', ancho: 20 },
-        { clave: 'registrados', titulo: 'Inversores registrados', ancho: 21 },
-        { clave: 'baterias', titulo: 'Banco de baterias', ancho: 17 },
-        { clave: 'baterias_kwh', titulo: 'Baterias (kWh)', ancho: 15 },
-        { clave: 'potencia_kwp', titulo: 'Potencia (kWp)', ancho: 15 },
-        { clave: 'paneles', titulo: 'Paneles', ancho: 10 },
-        { clave: 'origen_paneles', titulo: 'Origen de paneles', ancho: 17 },
-        { clave: 'potencia_paneles_kwp', titulo: 'Potencia paneles (kWp)', ancho: 21 },
-        { clave: 'produccion_kwh', titulo: 'Produccion acumulada (kWh)', ancho: 25 },
-        { clave: 'estado', titulo: 'Estado', ancho: 10 },
-      ],
-      filas: grupos.map((g) => ({
-        proyecto: nombreProyecto.get(g.id_proyecto) ?? '',
-        grupo: g.grupo,
-        declarados: g.cantidad_inversores_declarada ?? '',
-        registrados: Number(g.inversores_registrados),
-        baterias: g.tiene_banco_baterias ? 'Si' : 'No',
-        baterias_kwh: g.capacidad_baterias_kwh === null ? '' : Number(g.capacidad_baterias_kwh),
-        potencia_kwp: g.capacidad_kwp === null ? '' : Number(g.capacidad_kwp),
-        paneles: Number(g.cantidad_paneles),
-        origen_paneles: g.origen_paneles === 'INVERSORES' ? 'Inversores' : 'Lotes del grupo',
-        potencia_paneles_kwp: redondear(Number(g.capacidad_paneles_kwp), 3),
-        produccion_kwh: Number(produccionGrupo.get(g.id_grupo)?.kwh ?? 0),
-        estado: g.activo ? 'Activo' : 'Inactivo',
-      })),
-    };
-
-    const tablaInversores: TablaReporte = {
-      titulo: 'Inversores',
-      columnas: [
-        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
-        { clave: 'grupo', titulo: 'Grupo', ancho: 24 },
-        { clave: 'marca', titulo: 'Marca', ancho: 14 },
-        { clave: 'modelo', titulo: 'Modelo', ancho: 22 },
-        { clave: 'conexion', titulo: 'Conexion', ancho: 13 },
-        { clave: 'serie', titulo: 'Numero de serie', ancho: 22 },
-        { clave: 'potencia_kwp', titulo: 'Potencia (kWp)', ancho: 15 },
-        { clave: 'paneles', titulo: 'Paneles', ancho: 10 },
-        { clave: 'wp_panel', titulo: 'Potencia por panel (Wp)', ancho: 22 },
-        { clave: 'potencia_paneles_kwp', titulo: 'Potencia paneles (kWp)', ancho: 21 },
-        { clave: 'produccion_kwh', titulo: 'Produccion acumulada (kWh)', ancho: 25 },
-        { clave: 'estado', titulo: 'Estado', ancho: 15 },
-      ],
-      filas: inversores.map((i) => ({
-        proyecto: nombreProyecto.get(i.id_proyecto) ?? '',
-        grupo: nombreGrupo.get(i.id_grupo) ?? '',
-        marca: i.marca,
-        modelo: i.modelo,
-        conexion: i.tipo_conexion,
-        serie: i.serial_externo ?? '',
-        potencia_kwp: i.capacidad_kwp === null ? '' : Number(i.capacidad_kwp),
-        paneles: i.cantidad_paneles ?? '',
-        wp_panel: i.potencia_panel_wp === null ? '' : Number(i.potencia_panel_wp),
-        potencia_paneles_kwp:
-          i.cantidad_paneles && i.potencia_panel_wp
-            ? redondear((i.cantidad_paneles * Number(i.potencia_panel_wp)) / 1000, 3)
-            : '',
-        produccion_kwh: Number(produccionInversor.get(i.id_inversor)?.kwh ?? 0),
-        estado: i.activo ? i.estado : 'INACTIVO',
-      })),
-    };
-
-    const tablaLotes: TablaReporte = {
-      titulo: 'Lotes de paneles',
-      columnas: [
-        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
-        { clave: 'grupo', titulo: 'Grupo', ancho: 24 },
-        { clave: 'cantidad', titulo: 'Cantidad', ancho: 11 },
-        { clave: 'wp', titulo: 'Potencia por panel (Wp)', ancho: 22 },
-        { clave: 'kwp', titulo: 'Potencia del lote (kWp)', ancho: 22 },
-        { clave: 'marca', titulo: 'Marca', ancho: 16 },
-        { clave: 'modelo', titulo: 'Modelo', ancho: 20 },
-        { clave: 'fecha', titulo: 'Instalacion', ancho: 14 },
-      ],
-      filas: lotes.map((l) => ({
-        proyecto: nombreProyecto.get(l.id_proyecto) ?? '',
-        grupo: l.grupo,
-        cantidad: Number(l.cantidad),
-        wp: Number(l.potencia_wp),
-        kwp: redondear((Number(l.cantidad) * Number(l.potencia_wp)) / 1000, 3),
-        marca: l.marca ?? '',
-        modelo: l.modelo ?? '',
-        fecha: l.fecha_instalacion ? String(l.fecha_instalacion).slice(0, 10) : '',
-      })),
-    };
-
-    const tablaTarifas: TablaReporte = {
-      titulo: 'Tarifas',
-      columnas: [
-        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
-        { clave: 'anio', titulo: 'Anio tarifario', ancho: 14 },
-        { clave: 'trimestre', titulo: 'Trimestre', ancho: 12 },
-        { clave: 'costo', titulo: 'Tarifa (Q/kWh)', ancho: 15 },
-        { clave: 'estado', titulo: 'Estado', ancho: 13 },
-        { clave: 'origen', titulo: 'Origen', ancho: 20 },
-      ],
-      filas: tarifasVigentes.map((t) => ({
-        proyecto: nombreProyecto.get(t.id_proyecto) ?? '',
-        anio: t.anio,
-        trimestre: ['I', 'II', 'III', 'IV'][t.trimestre - 1] ?? String(t.trimestre),
-        costo: Number(t.costo_kwh),
-        estado: t.estado,
-        origen: t.origen,
-      })),
-    };
-
-    const filtros: Array<{ etiqueta: string; valor: string }> = [
-      { etiqueta: 'Proyectos incluidos', valor: soloActivos === '1' ? 'Solo activos' : 'Todos (activos e inactivos)' },
-    ];
-    if (idCliente) {
-      const cliente = await queryOne<{ nombre: string }>('SELECT nombre FROM clientes WHERE id_cliente = ?', [idCliente]);
-      filtros.push({ etiqueta: 'Cliente', valor: cliente?.nombre ?? String(idCliente) });
-    }
-
-    const empresa = await obtenerTexto('empresa.nombre', 'Retse, S.A.');
-    const buffer = await generarXlsx(
-      {
-        titulo: 'Inventario de proyectos',
-        subtitulo: `Stock total a ${formatoLargoEs(hoyISO())}`,
-        empresa,
-        usuario: req.usuario!.nombre,
-        filtros,
-        notas: [
-          'La produccion acumulada respeta la precedencia por inversor, grupo y proyecto: nunca se suma dos veces.',
-          'Los paneles de un grupo salen de sus inversores; si ninguno los tiene registrados, de los lotes del grupo.',
-          'Potencia en kWp (instalada) y energia en kWh. Valores en quetzales (GTQ).',
-        ],
-      },
-      [
-        { etiqueta: 'Clientes', valor: String(totales.clientes) },
-        { etiqueta: 'Proyectos', valor: String(totales.proyectos) },
-        { etiqueta: 'Grupos', valor: String(totales.grupos) },
-        { etiqueta: 'Inversores', valor: String(totales.inversores) },
-        { etiqueta: 'Paneles instalados', valor: formatoNumero(totales.paneles, 0) },
-        { etiqueta: 'Potencia instalada total', valor: `${formatoNumero(totales.potencia, 2)} kWp` },
-        { etiqueta: 'Potencia en paneles', valor: `${formatoNumero(totales.potenciaPaneles, 2)} kWp` },
-        { etiqueta: 'Produccion acumulada', valor: `${formatoNumero(totales.kwh, 2)} kWh` },
-        { etiqueta: 'Valor acumulado', valor: formatoQ(totales.valor) },
-        { etiqueta: 'Registros pendientes de tarifa', valor: String(totales.pendientes) },
-      ],
-      [tablaProyectos, tablaGrupos, tablaInversores, tablaLotes, tablaTarifas],
-    );
-
-    await auditarDesdeRequest(req, {
-      accion: 'REPORTE_EXPORTADO',
-      entidad: 'reportes',
-      idEntidad: 'inventario',
-      despues: { formato: 'xlsx', tipo: 'INVENTARIO_PROYECTOS', proyectos: totales.proyectos },
-    });
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="inventario_proyectos_${hoyISO()}.xlsx"`);
-    res.send(buffer);
   }),
 );
 
