@@ -71,6 +71,8 @@ export interface InversorCarga {
   capacidadKwp: number | null;
   estado: 'ACTIVO' | 'INACTIVO' | 'MANTENIMIENTO';
   observaciones: string | null;
+  cantidadPaneles: number | null;
+  potenciaPanelWp: number | null;
 }
 export interface DatosCarga {
   clientes: ClienteCarga[];
@@ -157,6 +159,8 @@ const COLUMNAS: Record<'Clientes' | 'Proyectos' | 'Grupos' | 'Inversores', Colum
     { clave: 'capacidadKwp', titulo: 'Potencia (kWp)', ancho: 16, alias: ['potencia kwp', 'kwp', 'potencia'], ayuda: 'Potencia del inversor en kWp.' },
     { clave: 'estado', titulo: 'Estado', ancho: 16, lista: ESTADOS, ayuda: 'ACTIVO por defecto.' },
     { clave: 'observaciones', titulo: 'Observaciones', ancho: 30, ayuda: 'Notas.' },
+    { clave: 'cantidadPaneles', titulo: 'Cantidad de paneles', ancho: 20, alias: ['cantidad de paneles', 'paneles'], ayuda: 'Paneles instalados en el inversor (con la potencia por panel).' },
+    { clave: 'potenciaPanelWp', titulo: 'Potencia por panel (Wp)', ancho: 22, alias: ['potencia por panel wp', 'potencia por panel', 'wp por panel'], ayuda: 'Vatios pico de cada panel, por ejemplo 550.' },
   ],
 };
 
@@ -164,7 +168,7 @@ const EJEMPLOS: Record<keyof typeof COLUMNAS, Array<Array<string | number>>> = {
   Clientes: [['EJEMPLO Cliente de prueba, S.A.', '1234567-8', 'Ciudad de Guatemala', 'Juan Pérez', '5555-0000', 'contacto@ejemplo.com', 'SI']],
   Proyectos: [['1234567-8', 'EJEMPLO Planta Norte', 'Escuintla', 'PPA', 'DISTRIBUIDORA', 'BTDA', '', 1.25, 250.5, '2025-03-01', 'Fila de ejemplo: bórrela']],
   Grupos: [['EJEMPLO Planta Norte', 'Grupo 1', 2, 'NO', '', 250.5, 'Techo principal', '']],
-  Inversores: [['EJEMPLO Planta Norte', 'Grupo 1', 'Huawei', 'SUN2000-100KTL', 'HUAWEI_API', 'HV0000000000', '', 100, 'ACTIVO', '']],
+  Inversores: [['EJEMPLO Planta Norte', 'Grupo 1', 'Huawei', 'SUN2000-100KTL', 'HUAWEI_API', 'HV0000000000', '', 100, 'ACTIVO', '', 182, 550]],
 };
 
 // ---------------------------------------------------------------------------
@@ -539,6 +543,15 @@ export async function leerCargaMasiva(contenido: Buffer): Promise<ResultadoLectu
     const kwp = opcionalNumero('Inversores', f, 'Potencia', r.capacidadKwp);
     const obs = texto(r.observaciones);
     if (obs && obs.length > 500) err('Inversores', f, 'Las observaciones superan los 500 caracteres.');
+    const cantPaneles = opcionalNumero('Inversores', f, 'Cantidad de paneles', r.cantidadPaneles);
+    const potPanel = opcionalNumero('Inversores', f, 'Potencia por panel', r.potenciaPanelWp);
+    if ((cantPaneles === null) !== (potPanel === null)) {
+      err('Inversores', f, 'Indique la cantidad de paneles y la potencia por panel (Wp), o deje ambas vacías.');
+    }
+    if (cantPaneles !== null && (!Number.isInteger(cantPaneles) || cantPaneles < 1)) {
+      err('Inversores', f, 'La cantidad de paneles debe ser un entero mayor que cero.');
+    }
+    if (potPanel !== null && potPanel <= 0) err('Inversores', f, 'La potencia por panel debe ser mayor que cero.');
     if (proyecto && serie) {
       const k = `${normalizar(proyecto)}|${serie.toLowerCase()}`;
       if (seriesVistas.has(k)) err('Inversores', f, `La serie ${serie} está repetida en el proyecto "${proyecto}".`);
@@ -554,6 +567,7 @@ export async function leerCargaMasiva(contenido: Buffer): Promise<ResultadoLectu
         fila: f, proyecto: nombresProyecto.get(normalizar(proyecto))!, grupo, marca, modelo,
         conexion: conexion as InversorCarga['conexion'], serie, estacion, capacidadKwp: kwp,
         estado: estado as InversorCarga['estado'], observaciones: obs,
+        cantidadPaneles: cantPaneles, potenciaPanelWp: potPanel,
       });
     }
   }
@@ -653,8 +667,8 @@ export function generarSql(datos: DatosCarga, origen = 'carga masiva'): string {
       i.conexion === 'HUAWEI_API'
         ? `(SELECT a.id_api FROM apis_fabricante a WHERE a.marca = 'HUAWEI' ORDER BY a.id_api LIMIT 1)`
         : 'NULL';
-    nl(`INSERT INTO inversores (id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo, estacion_externa, capacidad_kwp, estado, id_api, observaciones, activo)`);
-    nl(`SELECT g.id_proyecto, g.id_grupo, ${l(i.marca)}, ${l(i.modelo)}, ${l(i.conexion)}, ${l(i.serie)}, ${l(i.estacion)}, ${l(i.capacidadKwp)}, ${l(i.estado)}, ${idApi}, ${l(i.observaciones)}, 1`);
+    nl(`INSERT INTO inversores (id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo, estacion_externa, capacidad_kwp, cantidad_paneles, potencia_panel_wp, estado, id_api, observaciones, activo)`);
+    nl(`SELECT g.id_proyecto, g.id_grupo, ${l(i.marca)}, ${l(i.modelo)}, ${l(i.conexion)}, ${l(i.serie)}, ${l(i.estacion)}, ${l(i.capacidadKwp)}, ${l(i.cantidadPaneles)}, ${l(i.potenciaPanelWp)}, ${l(i.estado)}, ${idApi}, ${l(i.observaciones)}, 1`);
     nl(`  FROM grupos g JOIN proyectos p ON p.id_proyecto = g.id_proyecto`);
     nl(` WHERE p.nombre = ${l(i.proyecto)} AND g.nombre = ${l(i.grupo)}`);
     if (i.serie === null) {
@@ -664,7 +678,8 @@ export function generarSql(datos: DatosCarga, origen = 'carga masiva'): string {
     }
     nl(`ON DUPLICATE KEY UPDATE id_grupo = VALUES(id_grupo), marca = VALUES(marca), modelo = VALUES(modelo),`);
     nl(`  tipo_conexion = VALUES(tipo_conexion), estacion_externa = COALESCE(VALUES(estacion_externa), estacion_externa),`);
-    nl(`  capacidad_kwp = VALUES(capacidad_kwp), estado = VALUES(estado), id_api = COALESCE(VALUES(id_api), id_api),`);
+    nl(`  capacidad_kwp = VALUES(capacidad_kwp), cantidad_paneles = VALUES(cantidad_paneles),`);
+    nl(`  potencia_panel_wp = VALUES(potencia_panel_wp), estado = VALUES(estado), id_api = COALESCE(VALUES(id_api), id_api),`);
     nl(`  observaciones = VALUES(observaciones);`);
   }
   nl();

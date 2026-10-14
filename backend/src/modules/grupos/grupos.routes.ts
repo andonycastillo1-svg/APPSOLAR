@@ -89,12 +89,28 @@ const esquemaLotePaneles = z.object({
   activo: z.boolean().default(true),
 });
 
-/** Subconsulta reutilizable: totales de paneles activos de un grupo. */
-const SUBCONSULTA_PANELES = `
-  (SELECT COALESCE(SUM(pl.cantidad), 0) FROM paneles_grupo pl
-    WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1) AS cantidad_paneles,
-  (SELECT COALESCE(SUM(pl.cantidad * pl.potencia_wp), 0) / 1000 FROM paneles_grupo pl
-    WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1) AS capacidad_paneles_kwp`;
+/**
+ * Subconsulta reutilizable: totales de paneles activos de un grupo.
+ *
+ * Si algun inversor activo del grupo tiene sus paneles registrados, el total
+ * sale de la suma de los inversores; de lo contrario, de los lotes del grupo.
+ * Nunca se suman ambos (evita contar dos veces los mismos paneles).
+ */
+export const SUBCONSULTA_PANELES = `
+  IF(EXISTS (SELECT 1 FROM inversores iv WHERE iv.id_grupo = g.id_grupo AND iv.activo = 1
+                AND iv.cantidad_paneles IS NOT NULL),
+     (SELECT COALESCE(SUM(iv.cantidad_paneles), 0) FROM inversores iv
+       WHERE iv.id_grupo = g.id_grupo AND iv.activo = 1),
+     (SELECT COALESCE(SUM(pl.cantidad), 0) FROM paneles_grupo pl
+       WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1)) AS cantidad_paneles,
+  IF(EXISTS (SELECT 1 FROM inversores iv WHERE iv.id_grupo = g.id_grupo AND iv.activo = 1
+                AND iv.cantidad_paneles IS NOT NULL),
+     (SELECT COALESCE(SUM(iv.cantidad_paneles * iv.potencia_panel_wp), 0) / 1000 FROM inversores iv
+       WHERE iv.id_grupo = g.id_grupo AND iv.activo = 1),
+     (SELECT COALESCE(SUM(pl.cantidad * pl.potencia_wp), 0) / 1000 FROM paneles_grupo pl
+       WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1)) AS capacidad_paneles_kwp,
+  IF(EXISTS (SELECT 1 FROM inversores iv WHERE iv.id_grupo = g.id_grupo AND iv.activo = 1
+                AND iv.cantidad_paneles IS NOT NULL), 'INVERSORES', 'LOTES') AS origen_paneles`;
 
 async function proyectoDe(req: { params: Record<string, string> }): Promise<number> {
   const id = Number(req.params.projectId);

@@ -19,7 +19,7 @@ import { PERMISOS } from '../../config/permisos';
 import { auditarDesdeRequest } from '../../services/auditoria';
 import { tarifasRouter } from '../tarifas/tarifas.routes';
 import { proyeccionesRouter } from '../proyecciones/proyecciones.routes';
-import { gruposRouter } from '../grupos/grupos.routes';
+import { gruposRouter, SUBCONSULTA_PANELES } from '../grupos/grupos.routes';
 import { mesesCerradosDelTrimestre, recalcularPorTarifa } from '../../services/valorizacion';
 import { trimestreActual } from '../../utils/fechas';
 
@@ -254,10 +254,7 @@ proyectosRouter.get(
                 WHERE i.id_grupo = g.id_grupo AND i.activo = 1) AS inversores_registrados,
               (SELECT COALESCE(SUM(p.kwh), 0) FROM produccion p
                 WHERE p.id_grupo = g.id_grupo AND p.activo = 1) AS kwh_total,
-              (SELECT COALESCE(SUM(pl.cantidad), 0) FROM paneles_grupo pl
-                WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1) AS cantidad_paneles,
-              (SELECT COALESCE(SUM(pl.cantidad * pl.potencia_wp), 0) / 1000 FROM paneles_grupo pl
-                WHERE pl.id_grupo = g.id_grupo AND pl.activo = 1) AS capacidad_paneles_kwp
+              ${SUBCONSULTA_PANELES}
          FROM grupos g WHERE g.id_proyecto = ? ORDER BY g.nombre`,
       [id],
     );

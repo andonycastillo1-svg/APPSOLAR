@@ -45,11 +45,36 @@ const esquemaInversor = z.object({
   serial_externo: z.string().trim().max(80).optional().nullable(),
   estacion_externa: z.string().trim().max(80).optional().nullable(),
   capacidad_kwp: z.coerce.number().min(0, 'La potencia instalada no puede ser negativa.').optional().nullable(),
+  // Paneles instalados: cantidad y potencia pico de cada uno (misma potencia).
+  cantidad_paneles: z.coerce
+    .number()
+    .int('La cantidad de paneles debe ser un numero entero.')
+    .min(1, 'La cantidad de paneles debe ser al menos 1.')
+    .max(60000)
+    .optional()
+    .nullable(),
+  potencia_panel_wp: z.coerce
+    .number()
+    .gt(0, 'La potencia de cada panel debe ser mayor que cero (Wp).')
+    .max(2000, 'La potencia por panel parece demasiado alta (maximo 2000 Wp).')
+    .optional()
+    .nullable(),
   estado: z.enum(ESTADOS).default('ACTIVO'),
   id_api: z.coerce.number().int().positive().optional().nullable(),
   observaciones: z.string().trim().max(500).optional().nullable(),
   activo: z.boolean().default(true),
 });
+
+/** Cantidad y potencia por panel van juntas: ambas o ninguna. */
+function validarPaneles(cantidad: unknown, potencia: unknown): void {
+  const hayCantidad = cantidad !== null && cantidad !== undefined;
+  const hayPotencia = potencia !== null && potencia !== undefined;
+  if (hayCantidad !== hayPotencia) {
+    throw errores.validacion(
+      'Indique la cantidad de paneles y la potencia de cada panel (Wp), o deje ambos campos vacios.',
+    );
+  }
+}
 
 const COLUMNAS = {
   marca: 'i.marca',
@@ -120,6 +145,7 @@ inversoresRouter.get(
     const filas = await query(
       `SELECT i.*, pr.nombre AS proyecto, pr.id_cliente, c.nombre AS cliente,
               g.nombre AS grupo, g.tiene_banco_baterias,
+              ROUND(i.cantidad_paneles * i.potencia_panel_wp / 1000, 3) AS capacidad_paneles_kwp,
               (SELECT COALESCE(SUM(p.kwh), 0) FROM produccion p
                 WHERE p.id_inversor = i.id_inversor AND p.activo = 1) AS kwh_total,
               (SELECT MAX(p.fecha) FROM produccion p
@@ -236,14 +262,17 @@ inversoresRouter.post(
       }
     }
 
+    validarPaneles(datos.cantidad_paneles, datos.potencia_panel_wp);
+
     const idApi =
       datos.id_api ?? (datos.tipo_conexion === 'HUAWEI_API' ? await integracionHuawei() : null);
 
     const resultado = await execute(
       `INSERT INTO inversores
          (id_proyecto, id_grupo, marca, modelo, tipo_conexion, serial_externo, estacion_externa,
-          capacidad_kwp, estado, id_api, observaciones, activo, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          capacidad_kwp, cantidad_paneles, potencia_panel_wp, estado, id_api, observaciones,
+          activo, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         datos.id_proyecto,
         datos.id_grupo,
@@ -253,6 +282,8 @@ inversoresRouter.post(
         datos.serial_externo || null,
         datos.estacion_externa || null,
         datos.capacidad_kwp ?? null,
+        datos.cantidad_paneles ?? null,
+        datos.potencia_panel_wp ?? null,
         datos.estado,
         idApi,
         datos.observaciones || null,
@@ -282,8 +313,15 @@ inversoresRouter.put(
       id_proyecto: number;
       tipo_conexion: string;
       id_api: number | null;
+      cantidad_paneles: number | null;
+      potencia_panel_wp: number | null;
     }>('SELECT * FROM inversores WHERE id_inversor = ?', [id]);
     if (!actual) throw errores.noEncontrado('el inversor solicitado');
+
+    validarPaneles(
+      datos.cantidad_paneles !== undefined ? datos.cantidad_paneles : actual.cantidad_paneles,
+      datos.potencia_panel_wp !== undefined ? datos.potencia_panel_wp : actual.potencia_panel_wp,
+    );
 
     // Un inversor Huawei queda asociado a la integracion sin pedirselo al usuario.
     const tipoFinal = datos.tipo_conexion ?? actual.tipo_conexion;
@@ -311,6 +349,8 @@ inversoresRouter.put(
       serial_externo: datos.serial_externo,
       estacion_externa: datos.estacion_externa,
       capacidad_kwp: datos.capacidad_kwp,
+      cantidad_paneles: datos.cantidad_paneles,
+      potencia_panel_wp: datos.potencia_panel_wp,
       estado: datos.estado,
       id_api: datos.id_api,
       observaciones: datos.observaciones,

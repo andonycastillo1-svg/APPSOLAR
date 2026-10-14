@@ -32,6 +32,9 @@ interface Inversor {
   serial_externo: string | null;
   estacion_externa: string | null;
   capacidad_kwp: number | null;
+  cantidad_paneles: number | null;
+  potencia_panel_wp: number | null;
+  capacidad_paneles_kwp: number | null;
   estado: string;
   id_api: number | null;
   observaciones: string | null;
@@ -78,6 +81,8 @@ const VACIO = {
   serial_externo: '',
   estacion_externa: '',
   capacidad_kwp: '',
+  cantidad_paneles: '',
+  potencia_panel_wp: '',
   estado: 'ACTIVO',
   observaciones: '',
   activo: true,
@@ -135,6 +140,8 @@ export function PaginaInversores() {
         id_proyecto: Number(formulario.id_proyecto),
         id_grupo: formulario.id_grupo === '' ? undefined : Number(formulario.id_grupo),
         capacidad_kwp: formulario.capacidad_kwp === '' ? null : Number(formulario.capacidad_kwp),
+        cantidad_paneles: formulario.cantidad_paneles === '' ? null : Number(formulario.cantidad_paneles),
+        potencia_panel_wp: formulario.potencia_panel_wp === '' ? null : Number(formulario.potencia_panel_wp),
         serial_externo: formulario.serial_externo || null,
         estacion_externa: formulario.estacion_externa || null,
         observaciones: formulario.observaciones || null,
@@ -300,6 +307,19 @@ export function PaginaInversores() {
               ),
             },
             { clave: 'kwp', titulo: 'Potencia', numerica: true, render: (f) => kwp(f.capacidad_kwp) },
+            {
+              clave: 'paneles',
+              titulo: 'Paneles',
+              numerica: true,
+              render: (f) =>
+                f.cantidad_paneles ? (
+                  <span title={`${f.cantidad_paneles} paneles de ${Number(f.potencia_panel_wp)} Wp`}>
+                    {f.cantidad_paneles} × {Number(f.potencia_panel_wp)} Wp
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--texto-suave)' }}>—</span>
+                ),
+            },
             { clave: 'kwh', titulo: 'Generacion acumulada', numerica: true, render: (f) => kwh(f.kwh_total) },
             {
               clave: 'estado',
@@ -342,6 +362,9 @@ export function PaginaInversores() {
                             serial_externo: f.serial_externo ?? '',
                             estacion_externa: f.estacion_externa ?? '',
                             capacidad_kwp: f.capacidad_kwp === null ? '' : String(f.capacidad_kwp),
+                            cantidad_paneles: f.cantidad_paneles === null ? '' : String(f.cantidad_paneles),
+                            potencia_panel_wp:
+                              f.potencia_panel_wp === null ? '' : String(Number(f.potencia_panel_wp)),
                             estado: f.estado,
                             observaciones: f.observaciones ?? '',
                             activo: Boolean(f.activo),
@@ -472,6 +495,33 @@ export function PaginaInversores() {
                 ayuda="Necesaria para comparar el rendimiento relativo entre inversores."
                 onChange={(e) => setFormulario({ ...formulario, capacidad_kwp: e.target.value })}
               />
+              <CampoTexto
+                etiqueta="Cantidad de paneles instalados"
+                type="number"
+                min="1"
+                step="1"
+                value={formulario.cantidad_paneles}
+                error={erroresCampo.cantidad_paneles}
+                ayuda="Paneles que tiene conectados este inversor (todos de la misma potencia)."
+                onChange={(e) => setFormulario({ ...formulario, cantidad_paneles: e.target.value })}
+              />
+              <CampoTexto
+                etiqueta="Potencia de cada panel (Wp)"
+                type="number"
+                min="0"
+                step="0.01"
+                value={formulario.potencia_panel_wp}
+                error={erroresCampo.potencia_panel_wp}
+                ayuda={
+                  formulario.cantidad_paneles && formulario.potencia_panel_wp
+                    ? `Total del inversor: ${(
+                        (Number(formulario.cantidad_paneles) * Number(formulario.potencia_panel_wp)) /
+                        1000
+                      ).toLocaleString('es-GT', { maximumFractionDigits: 3 })} kWp en paneles.`
+                    : 'Vatios pico de cada panel, por ejemplo 550.'
+                }
+                onChange={(e) => setFormulario({ ...formulario, potencia_panel_wp: e.target.value })}
+              />
               <CampoSelect
                 etiqueta="Estado operativo"
                 value={formulario.estado}
@@ -525,6 +575,12 @@ export function PaginaInversores() {
                 <dd style={{ margin: 0 }}>{consultaDetalle.data.serial_externo ?? 'No registrado'}</dd>
                 <dt style={{ fontWeight: 640 }}>Potencia instalada</dt>
                 <dd style={{ margin: 0 }}>{kwp(consultaDetalle.data.capacidad_kwp)}</dd>
+                <dt style={{ fontWeight: 640 }}>Paneles instalados</dt>
+                <dd style={{ margin: 0 }}>
+                  {consultaDetalle.data.cantidad_paneles
+                    ? `${consultaDetalle.data.cantidad_paneles} paneles de ${Number(consultaDetalle.data.potencia_panel_wp)} Wp`
+                    : 'No registrados'}
+                </dd>
                 <dt style={{ fontWeight: 640 }}>Integracion</dt>
                 <dd style={{ margin: 0 }}>
                   {consultaDetalle.data.api_marca
