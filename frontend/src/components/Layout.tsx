@@ -170,9 +170,11 @@ export function Layout() {
 
       <aside className="lateral" data-abierto={menuAbierto} id="menu-lateral">
         <div className="lateral__marca">
-          <span className="lateral__logo" aria-hidden="true">
-            <Icono nombre="proyectos" tamano={24} />
-          </span>
+          <img
+            className="lateral__logo-img"
+            src="/logo-sbc-transparente.png"
+            alt="SBC - Servicios Básicos Centralizados"
+          />
           <div className="lateral__titulos">
             <span>Retse, S.A.</span>
             <strong>Monitoreo Energetico</strong>

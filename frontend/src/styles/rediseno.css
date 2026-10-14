@@ -11,15 +11,16 @@
    ===================================================================== */
 
 :root {
-  --primario: #0b5fa5;
-  --primario-2: #0a4d86;
-  --primario-sombra: rgba(11, 95, 165, 0.32);
-  --acento: #f59e0b;
-  --acento-2: #d97706;
+  /* Colores de la marca SBC: azul #1c4f90 y ambar #f7a806 */
+  --primario: #1c4f90;
+  --primario-2: #153f75;
+  --primario-sombra: rgba(28, 79, 144, 0.34);
+  --acento: #f7a806;
+  --acento-2: #d98f00;
   --fondo: #f3f6fa;
   --superficie-2: #f7f9fc;
-  --lateral-1: #071b2b;
-  --lateral-2: #0c3556;
+  --lateral-1: #08203d;
+  --lateral-2: #14447f;
   --vidrio: rgba(255, 255, 255, 0.82);
   --radio: 14px;
   --radio-sm: 10px;
@@ -34,9 +35,9 @@
 
 [data-tema='oscuro'] {
   color-scheme: dark;
-  --primario: #3b94e8;
-  --primario-2: #2f7fd0;
-  --primario-sombra: rgba(59, 148, 232, 0.35);
+  --primario: #4b8fe0;
+  --primario-2: #3a78c4;
+  --primario-sombra: rgba(75, 143, 224, 0.35);
   --fondo: #0b141c;
   --superficie: #121f2a;
   --superficie-2: #16262f;
@@ -44,8 +45,8 @@
   --texto-suave: #98aebc;
   --borde: #263847;
   --vidrio: rgba(14, 24, 33, 0.82);
-  --lateral-1: #050e16;
-  --lateral-2: #0a2238;
+  --lateral-1: #050f1c;
+  --lateral-2: #0b2748;
   --sombra: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.28);
 
   /* Se remapean los tonos heredados para que todo el sistema se adapte. */
@@ -823,4 +824,20 @@ a:hover .icono--clientes, a:hover .icono--usuarios { animation: saltito 600ms ea
   .proyecto-hero { padding: 1.1rem 1.1rem; }
   .proyecto-hero__datos > div { min-width: 96px; }
   .tarjetas-proyecto { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+}
+
+/* ------------------------------------------------------------ Logo SBC */
+
+.lateral__marca { flex-direction: column; align-items: flex-start; gap: 0.55rem; }
+.lateral__logo-img { display: block; width: 100%; max-width: 214px; height: auto; }
+.lateral__marca .lateral__titulos { padding-left: 2px; }
+
+.login__logo {
+  display: block;
+  width: min(100%, 320px);
+  height: auto;
+  margin: 0 auto 1.1rem;
+  border-radius: 16px;
+  box-shadow: 0 10px 28px rgba(28, 79, 144, 0.35);
+  animation: modal-entra 600ms var(--transicion) both;
 }

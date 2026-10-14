@@ -56,7 +56,7 @@ export function PaginaIngreso() {
     <div className="login">
       <main className="login__caja">
         <div className="login__marca">
-          <div className="login__sol" aria-hidden="true" />
+          <img className="login__logo" src="/logo-sbc.png" alt="SBC - Servicios Básicos Centralizados" />
           <h1>Sistema Centralizado de Monitoreo Energetico</h1>
           <p>Analisis de produccion solar · Retse, S.A.</p>
         </div>
