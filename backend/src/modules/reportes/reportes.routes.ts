@@ -19,7 +19,13 @@ import { auditarDesdeRequest } from '../../services/auditoria';
 import * as consultas from '../../services/consultasProduccion';
 import { coberturaTarifaria } from '../../services/valorizacion';
 import { obtenerTexto } from '../../services/configuracion';
-import { generarCsv, generarPdf, generarXlsx, type TablaReporte } from '../../services/exportacion';
+import {
+  generarCsv,
+  generarPdf,
+  generarXlsx,
+  generarXlsxInventario,
+  type TablaReporte,
+} from '../../services/exportacion';
 import { MESES_ES, formatoLargoEs, hoyISO, periodoAnterior } from '../../utils/fechas';
 import { SUBCONSULTA_PANELES } from '../grupos/grupos.routes';
 import { redondear } from '../../utils/numeros';
@@ -248,40 +254,69 @@ async function calcularInventario(opciones: {
 
   const tablas: TablaReporte[] = [
     {
-      titulo: 'Proyectos',
+      // Misma tabla que se muestra en pantalla: mismas columnas y orden.
+      titulo: 'Inventario',
       columnas: [
         { clave: 'cliente', titulo: 'Cliente', ancho: 30 },
         { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
-        { clave: 'grupos', titulo: 'Grupos', ancho: 9, alineacion: 'right' },
-        { clave: 'inversores', titulo: 'Inversores', ancho: 11, alineacion: 'right' },
-        { clave: 'paneles', titulo: 'Paneles', ancho: 10, alineacion: 'right' },
-        { clave: 'potencia_kwp', titulo: 'Potencia (kWp)', ancho: 15, alineacion: 'right' },
-        { clave: 'produccion_kwh', titulo: 'Produccion (kWh)', ancho: 18, alineacion: 'right' },
-        { clave: 'valor_q', titulo: 'Valor (Q)', ancho: 16, alineacion: 'right' },
-        { clave: 'pendientes', titulo: 'Sin tarifa', ancho: 11, alineacion: 'right' },
-        { clave: 'modalidad', titulo: 'Modalidad', ancho: 11 },
-        { clave: 'suministradora', titulo: 'Suministradora', ancho: 18 },
-        { clave: 'tipo_tarifa', titulo: 'Tipo de tarifa', ancho: 13 },
-        { clave: 'valor_pactado', titulo: 'Valor pactado (Q/kWh)', ancho: 20, alineacion: 'right' },
-        { clave: 'nit', titulo: 'NIT', ancho: 14 },
-        { clave: 'ubicacion', titulo: 'Ubicacion', ancho: 26 },
-        { clave: 'inicio', titulo: 'Inicio de operacion', ancho: 18 },
-        { clave: 'estado', titulo: 'Estado', ancho: 10 },
+        { clave: 'grupos', titulo: 'Grupos', ancho: 10, alineacion: 'right' },
+        { clave: 'inversores', titulo: 'Inversores', ancho: 12, alineacion: 'right' },
+        { clave: 'paneles', titulo: 'Paneles', ancho: 11, alineacion: 'right' },
+        { clave: 'potencia_kwp', titulo: 'Potencia kWp', ancho: 15, alineacion: 'right' },
+        { clave: 'produccion_kwh', titulo: 'Produccion kWh', ancho: 18, alineacion: 'right' },
+        { clave: 'valor_q', titulo: 'Valor Q', ancho: 16, alineacion: 'right' },
+        { clave: 'modalidad', titulo: 'Modalidad', ancho: 12 },
+        { clave: 'suministradora', titulo: 'Suministradora', ancho: 26 },
+        { clave: 'estado', titulo: 'Estado', ancho: 11 },
       ],
       filas: [
-        ...filas.map((f) => ({ ...f, valor_pactado: f.valor_pactado ?? '' })),
+        ...filas.map((f) => ({
+          cliente: f.cliente,
+          proyecto: f.proyecto,
+          grupos: f.grupos,
+          inversores: f.inversores,
+          paneles: f.paneles,
+          potencia_kwp: f.potencia_kwp,
+          produccion_kwh: f.produccion_kwh,
+          valor_q: f.valor_q,
+          modalidad: f.modalidad,
+          suministradora:
+            (f.suministradora === 'DISTRIBUIDORA'
+              ? 'Distribuidora'
+              : f.suministradora === 'COMERCIALIZADORA'
+                ? 'Comercializadora'
+                : '-') + (f.tipo_tarifa ? ` · ${f.tipo_tarifa}` : ''),
+          estado: f.estado,
+          pendientes: f.pendientes,
+        })),
         {
           cliente: 'TOTAL',
-          proyecto: `${totales.proyectos} proyecto(s)`,
+          proyecto: '',
           grupos: totales.grupos,
           inversores: totales.inversores,
           paneles: totales.paneles,
           potencia_kwp: totales.potencia_kwp,
           produccion_kwh: totales.produccion_kwh,
           valor_q: totales.valor_q,
-          pendientes: totales.pendientes,
         },
       ],
+    },
+    {
+      titulo: 'Datos de proyectos',
+      columnas: [
+        { clave: 'cliente', titulo: 'Cliente', ancho: 30 },
+        { clave: 'nit', titulo: 'NIT', ancho: 14 },
+        { clave: 'proyecto', titulo: 'Proyecto', ancho: 34 },
+        { clave: 'ubicacion', titulo: 'Ubicacion', ancho: 28 },
+        { clave: 'modalidad', titulo: 'Modalidad', ancho: 12 },
+        { clave: 'suministradora', titulo: 'Suministradora', ancho: 18 },
+        { clave: 'tipo_tarifa', titulo: 'Tipo de tarifa', ancho: 14 },
+        { clave: 'valor_pactado', titulo: 'Valor pactado (Q/kWh)', ancho: 21 },
+        { clave: 'potencia_paneles_kwp', titulo: 'Potencia en paneles (kWp)', ancho: 24 },
+        { clave: 'pendientes', titulo: 'Registros sin tarifa', ancho: 19 },
+        { clave: 'inicio', titulo: 'Inicio de operacion', ancho: 19 },
+      ],
+      filas: filas.map((f) => ({ ...f, valor_pactado: f.valor_pactado ?? '' })),
     },
     {
       titulo: 'Grupos',
@@ -833,7 +868,9 @@ reportesRouter.get(
     }
 
     if (formato === 'xlsx') {
-      const buffer = await generarXlsx(encabezado, indicadores, tablas);
+      const buffer = reporte.inventario
+        ? await generarXlsxInventario(encabezado, indicadores, tablas[0], tablas.slice(1))
+        : await generarXlsx(encabezado, indicadores, tablas);
       res.setHeader(
         'Content-Type',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

@@ -93,6 +93,114 @@ export async function generarXlsx(
   return Buffer.from(await libro.xlsx.writeBuffer());
 }
 
+/**
+ * Libro de Excel del inventario de proyectos.
+ *
+ * La primera hoja es EXACTAMENTE la tabla que ve la persona en pantalla
+ * (mismas columnas, mismo orden, fila de TOTAL al final), con formato numerico
+ * para que se pueda sumar y filtrar. El resto de hojas son el detalle.
+ */
+export async function generarXlsxInventario(
+  encabezado: EncabezadoReporte,
+  indicadores: IndicadorReporte[],
+  principal: TablaReporte,
+  detalle: TablaReporte[],
+): Promise<Buffer> {
+  const libro = new ExcelJS.Workbook();
+  libro.creator = encabezado.empresa;
+  libro.created = new Date();
+
+  const FORMATOS: Record<string, string> = {
+    grupos: '#,##0',
+    inversores: '#,##0',
+    paneles: '#,##0',
+    potencia_kwp: '#,##0.00',
+    produccion_kwh: '#,##0.00',
+    valor_q: '"Q" #,##0.00',
+  };
+  const AZUL_ARGB = 'FF1C4F90';
+
+  const hoja = libro.addWorksheet('Inventario', { views: [{ state: 'frozen', ySplit: 4 }] });
+  hoja.columns = principal.columnas.map((c) => ({ key: c.clave, width: c.ancho ?? 16 }));
+
+  const ultima = principal.columnas.length;
+  hoja.mergeCells(1, 1, 1, ultima);
+  const titulo = hoja.getCell(1, 1);
+  titulo.value = `${encabezado.titulo}${encabezado.subtitulo ? ' - ' + encabezado.subtitulo : ''}`;
+  titulo.font = { bold: true, size: 14, color: { argb: AZUL_ARGB } };
+  hoja.mergeCells(2, 1, 2, ultima);
+  hoja.getCell(2, 1).value =
+    `${encabezado.empresa} | Generado por ${encabezado.usuario} | ${ahoraLocal()} (${ZONA_HORARIA}) | ` +
+    encabezado.filtros.map((f) => `${f.etiqueta}: ${f.valor}`).join(' | ');
+  hoja.getCell(2, 1).font = { size: 9, color: { argb: 'FF5B6770' } };
+
+  // Fila 4: encabezado de la tabla (la 3 queda como separador).
+  const cabecera = hoja.getRow(4);
+  principal.columnas.forEach((c, i) => {
+    const celda = cabecera.getCell(i + 1);
+    celda.value = c.titulo;
+    celda.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AZUL_ARGB } };
+    celda.alignment = { horizontal: c.alineacion === 'right' ? 'right' : 'left', vertical: 'middle', wrapText: true };
+  });
+  cabecera.height = 24;
+
+  principal.filas.forEach((fila, indice) => {
+    const esTotal = String(fila.cliente) === 'TOTAL';
+    const r = hoja.getRow(5 + indice);
+    principal.columnas.forEach((c, i) => {
+      const celda = r.getCell(i + 1);
+      const valor = fila[c.clave];
+      celda.value = valor === undefined || valor === null ? '' : (valor as ExcelJS.CellValue);
+      if (typeof valor === 'number' && FORMATOS[c.clave]) celda.numFmt = FORMATOS[c.clave];
+      celda.alignment = { horizontal: c.alineacion === 'right' ? 'right' : 'left', vertical: 'middle' };
+      celda.border = { bottom: { style: 'thin', color: { argb: 'FFE3E9ED' } } };
+      if (esTotal) {
+        celda.font = { bold: true };
+        celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE8F5' } };
+        celda.border = { top: { style: 'medium', color: { argb: AZUL_ARGB } } };
+      }
+    });
+    // Registros sin tarifa: se avisa en una nota de la celda de valor.
+    const pendientes = Number(fila.pendientes ?? 0);
+    if (!esTotal && pendientes > 0) {
+      const posicion = principal.columnas.findIndex((c) => c.clave === 'valor_q');
+      if (posicion >= 0) {
+        r.getCell(posicion + 1).note = `${pendientes} registro(s) sin tarifa: monto parcial`;
+        r.getCell(posicion + 1).font = { color: { argb: 'FFB7791F' }, bold: true };
+      }
+    }
+  });
+  const ultimaFila = 4 + principal.filas.length;
+  hoja.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(4, ultimaFila - 1), column: ultima } };
+
+  // Hojas de detalle
+  detalle.forEach((tabla, indice) => {
+    const h = libro.addWorksheet((tabla.titulo ?? `Detalle ${indice + 1}`).slice(0, 30));
+    h.columns = tabla.columnas.map((c) => ({ header: c.titulo, key: c.clave, width: c.ancho ?? 18 }));
+    tabla.filas.forEach((f) => h.addRow(f));
+    const cab = h.getRow(1);
+    cab.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cab.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AZUL_ARGB } };
+    h.views = [{ state: 'frozen', ySplit: 1 }];
+  });
+
+  // Resumen y notas al final
+  const resumen = libro.addWorksheet('Resumen y notas');
+  resumen.columns = [{ width: 34 }, { width: 60 }];
+  resumen.addRow([encabezado.titulo]).font = { bold: true, size: 14, color: { argb: AZUL_ARGB } };
+  resumen.addRow([]);
+  for (const f of encabezado.filtros) resumen.addRow([f.etiqueta, f.valor]);
+  resumen.addRow([]);
+  resumen.addRow(['TOTALES']).font = { bold: true };
+  for (const i of indicadores) resumen.addRow([i.etiqueta, i.valor + (i.detalle ? ` (${i.detalle})` : '')]);
+  resumen.addRow([]);
+  resumen.addRow(['NOTAS']).font = { bold: true };
+  for (const n of encabezado.notas) resumen.addRow([n]);
+
+  return Buffer.from(await libro.xlsx.writeBuffer());
+}
+
 export function generarPdf(
   encabezado: EncabezadoReporte,
   indicadores: IndicadorReporte[],

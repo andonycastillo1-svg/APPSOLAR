@@ -85,24 +85,41 @@ describe('Inventario de proyectos en Excel', () => {
     expect(creado.inventario.totales.proyectos).toBe(1);
     expect(creado.inventario.totales.inversores).toBe(2);
 
-    // Y en el Excel
+    // Y en el Excel: la primera hoja es la misma tabla de la vista
     expect(libro.worksheets.map((h) => h.name)).toEqual([
-      'Resumen',
-      'Proyectos',
+      'Inventario',
+      'Datos de proyectos',
       'Grupos',
       'Inversores',
       'Lotes de paneles',
       'Tarifas',
+      'Resumen y notas',
     ]);
-    const proyectos = libro.getWorksheet('Proyectos')!;
-    expect(proyectos.rowCount).toBe(3); // encabezado + proyecto + total
-    const datosFila = proyectos.getRow(2);
+    const hoja = libro.getWorksheet('Inventario')!;
+    const encabezados = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((c) => hoja.getRow(4).getCell(c).value);
+    expect(encabezados).toEqual([
+      'Cliente',
+      'Proyecto',
+      'Grupos',
+      'Inversores',
+      'Paneles',
+      'Potencia kWp',
+      'Produccion kWh',
+      'Valor Q',
+      'Modalidad',
+      'Suministradora',
+      'Estado',
+    ]);
+    expect(hoja.rowCount).toBe(6); // titulo, filtros, vacia, encabezado, proyecto, total
+    const datosFila = hoja.getRow(5);
     expect(datosFila.getCell(1).value).toBe('Cliente Pruebas');
     expect(datosFila.getCell(2).value).toBe('Planta Pruebas');
     expect(datosFila.getCell(3).value).toBe(1);
     expect(datosFila.getCell(4).value).toBe(2);
     expect(datosFila.getCell(5).value).toBe(100);
-    const total = proyectos.getRow(3);
+    expect(Number(datosFila.getCell(7).value)).toBeCloseTo(1250.5, 2);
+    expect(String(datosFila.getCell(10).value)).toContain('Distribuidora');
+    const total = hoja.getRow(6);
     expect(total.getCell(1).value).toBe('TOTAL');
     expect(total.getCell(4).value).toBe(2);
     expect(Number(total.getCell(7).value)).toBeCloseTo(1250.5, 2);
@@ -123,9 +140,10 @@ describe('Inventario de proyectos en Excel', () => {
     expect(creado.inventario.filas).toHaveLength(2);
     expect(creado.inventario.totales.proyectos).toBe(2);
     expect(creado.inventario.totales.produccion_kwh).toBeCloseTo(2000, 2);
-    const proyectos = libro.getWorksheet('Proyectos')!;
-    expect(proyectos.rowCount).toBe(4);
-    expect(Number(proyectos.getRow(4).getCell(7).value)).toBeCloseTo(2000, 2);
+    const hoja = libro.getWorksheet('Inventario')!;
+    expect(hoja.rowCount).toBe(7); // 4 de cabecera + 2 proyectos + total
+    expect(hoja.getRow(7).getCell(1).value).toBe('TOTAL');
+    expect(Number(hoja.getRow(7).getCell(7).value)).toBeCloseTo(2000, 2);
   });
 
   it('puede filtrarse por cliente y solo activos', async () => {
