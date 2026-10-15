@@ -23,3 +23,6 @@ Thumbs.db
 hosting/paquete/
 hosting/*.zip
 hosting/hostinger.env
+
+# Archivos temporales de Word
+~$*
