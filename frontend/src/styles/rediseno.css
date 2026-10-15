@@ -874,3 +874,44 @@ tfoot .fila-total td {
   border-top: 2px solid var(--primario);
   position: static;
 }
+
+/* ----------------------------------------------- Correcciones de maquetacion */
+
+/* El contenido nunca debe ensanchar la pagina: las tablas anchas se desplazan
+   dentro de su propia envoltura. */
+.app { grid-template-columns: var(--lateral) minmax(0, 1fr); }
+.contenido { min-width: 0; }
+
+/* Barra lateral: el menu se desplaza y el boton de sincronizar queda siempre
+   visible debajo, sin tapar ningun modulo. */
+.lateral {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  align-self: start;
+  overflow: hidden;
+}
+.lateral nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+.lateral__sync { position: static; margin-top: 0; flex: 0 0 auto; }
+
+@media (max-width: 1024px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .lateral { position: fixed; height: auto; }
+}
+
+/* Cifras y montos nunca se parten en dos lineas; tabla compacta para
+   reportes anchos (inventario de proyectos). */
+td.num, th.num { white-space: nowrap; }
+.tabla-compacta th, .tabla-compacta td { padding: 0.5rem 0.55rem; font-size: 0.8rem; }
+.tabla-compacta th { letter-spacing: 0.03em; }
+
+/* En los avisos solo el titulo es un bloque; la negrita dentro del texto
+   sigue en la misma linea. */
+.mensaje strong { display: inline; margin-bottom: 0; }
+.mensaje .mensaje__titulo { display: block; margin-bottom: 0.2rem; }

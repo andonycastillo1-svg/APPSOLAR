@@ -4,6 +4,7 @@ import { execute, query, queryOne } from './pool';
 import { hashPassword, validarFortalezaPassword } from '../services/auth';
 import { calcularValorQ, redondearKwh } from '../utils/numeros';
 import { diasEnMes, etiquetaTrimestre, periodoTarifario } from '../utils/fechas';
+import { buscarTarifaDelMes } from '../services/valorizacion';
 
 /**
  * Datos iniciales.
@@ -548,13 +549,10 @@ export async function sembrarDemostracion(): Promise<void> {
   // --- Produccion -------------------------------------------------------
   const rnd = aleatorio(20260821);
 
-  // La tarifa vigente de un mes es la de SU trimestre calendario.
+  // La tarifa vigente de un mes es la de SU trimestre tarifario (inicia en
+  // noviembre); en comercializadora rige el valor pactado del proyecto.
   const tarifaDe = async (idProyecto: number, anio: number, mes: number) =>
-    queryOne<{ id_tarifa: number; costo_kwh: number }>(
-      `SELECT id_tarifa, costo_kwh FROM tarifas_kwh
-        WHERE id_proyecto = ? AND anio = ? AND trimestre = ? AND estado = 'APROBADA'`,
-      [idProyecto, anio, Math.ceil(mes / 3)],
-    );
+    buscarTarifaDelMes(idProyecto, anio, mes);
 
   const insertarProduccion = async (parametros: {
     idProyecto: number;

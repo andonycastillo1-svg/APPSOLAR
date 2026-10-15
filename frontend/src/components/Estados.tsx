@@ -47,7 +47,7 @@ export function SinPermiso({ permiso }: { permiso?: string }) {
   return (
     <div className="mensaje mensaje--alerta" role="status">
       <div>
-        <strong>No tiene permisos para ver esta seccion</strong>
+        <strong className="mensaje__titulo">No tiene permisos para ver esta seccion</strong>
         Su rol no incluye {permiso ? <code>{permiso}</code> : 'los permisos necesarios'}. Si
         considera que deberia tener acceso, solicitelo al administrador del sistema.
       </div>
@@ -76,7 +76,7 @@ export function MensajeError({
   return (
     <div className="mensaje mensaje--error" role="alert">
       <div style={{ flex: 1 }}>
-        <strong>No fue posible completar la operacion</strong>
+        <strong className="mensaje__titulo">No fue posible completar la operacion</strong>
         {mensaje}
         {esApi && Array.isArray(error.detalles) ? (
           <ul style={{ margin: '0.4rem 0 0 1rem' }}>
@@ -115,7 +115,7 @@ export function MensajeAlerta({ titulo, children }: { titulo?: string; children:
   return (
     <div className="mensaje mensaje--alerta" role="status">
       <div>
-        {titulo ? <strong>{titulo}</strong> : null}
+        {titulo ? <strong className="mensaje__titulo">{titulo}</strong> : null}
         {children}
       </div>
     </div>
@@ -126,7 +126,7 @@ export function MensajeInfo({ titulo, children }: { titulo?: string; children: R
   return (
     <div className="mensaje mensaje--info">
       <div>
-        {titulo ? <strong>{titulo}</strong> : null}
+        {titulo ? <strong className="mensaje__titulo">{titulo}</strong> : null}
         {children}
       </div>
     </div>

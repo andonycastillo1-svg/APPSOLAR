@@ -428,7 +428,7 @@ export function PaginaReportes() {
                 </section>
 
                 <div className="tabla-envoltura">
-                  <table>
+                  <table className="tabla-compacta">
                     <caption>
                       Un proyecto por fila, agrupado por cliente. La ultima fila es el total para gerencia.
                     </caption>
@@ -451,7 +451,7 @@ export function PaginaReportes() {
                       {generado.inventario.filas.map((f) => (
                         <tr key={f.id_proyecto}>
                           <td>{f.cliente}</td>
-                          <th scope="row" style={{ position: 'static', background: 'transparent' }}>{f.proyecto}</th>
+                          <td style={{ fontWeight: 600 }}>{f.proyecto}</td>
                           <td className="num">{f.grupos}</td>
                           <td className="num">{f.inversores}</td>
                           <td className="num">{numero(f.paneles, 0)}</td>
