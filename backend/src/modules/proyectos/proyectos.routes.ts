@@ -21,7 +21,7 @@ import { tarifasRouter } from '../tarifas/tarifas.routes';
 import { proyeccionesRouter } from '../proyecciones/proyecciones.routes';
 import { gruposRouter, SUBCONSULTA_PANELES } from '../grupos/grupos.routes';
 import { mesesCerradosDelTrimestre, recalcularPorTarifa } from '../../services/valorizacion';
-import { trimestreActual } from '../../utils/fechas';
+import { ahoraGuatemala, trimestreActual } from '../../utils/fechas';
 
 export const proyectosRouter = Router();
 proyectosRouter.use(requiereAutenticacion);
@@ -410,7 +410,7 @@ proyectosRouter.post(
             aprueba ? 'APROBADA' : 'BORRADOR',
             req.usuario!.id_usuario,
             aprueba ? req.usuario!.id_usuario : null,
-            aprueba ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null,
+            aprueba ? ahoraGuatemala() : null,
           ],
           conn,
         );
@@ -434,7 +434,7 @@ proyectosRouter.post(
             apruebaProyeccion ? 'APROBADA' : 'BORRADOR',
             req.usuario!.id_usuario,
             apruebaProyeccion ? req.usuario!.id_usuario : null,
-            apruebaProyeccion ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null,
+            apruebaProyeccion ? ahoraGuatemala() : null,
           ],
           conn,
         );

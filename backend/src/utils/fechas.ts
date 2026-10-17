@@ -8,6 +8,20 @@
 
 export const ZONA_HORARIA = 'America/Guatemala';
 
+/**
+ * Fecha y hora actual en Guatemala con el formato de MySQL (`YYYY-MM-DD HH:mm:ss`).
+ * Reemplaza a `new Date().toISOString()`, que da la hora UTC y desfasaria la auditoria.
+ */
+export function ahoraGuatemala(): string {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ZONA_HORARIA,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const v = (t: string) => partes.find((p) => p.type === t)?.value ?? '00';
+  return `${v('year')}-${v('month')}-${v('day')} ${v('hour')}:${v('minute')}:${v('second')}`;
+}
+
 export const MESES_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',

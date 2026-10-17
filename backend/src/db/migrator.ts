@@ -78,6 +78,7 @@ export async function runMigrations(): Promise<MigrationResult> {
     database: env.db.database,
     multipleStatements: true,
   });
+  await conn.query(`SET time_zone = '${env.db.timezone}'`);
 
   const aplicadas: string[] = [];
   const omitidas: string[] = [];

@@ -6,7 +6,7 @@ import { asyncHandler, consulta, creado, ok, validarConsulta, validarCuerpo } fr
 import { requierePermiso } from '../../middleware/autenticacion';
 import { PERMISOS } from '../../config/permisos';
 import { auditarDesdeRequest } from '../../services/auditoria';
-import { MESES_ES, anioActual } from '../../utils/fechas';
+import { MESES_ES, anioActual, ahoraGuatemala } from '../../utils/fechas';
 import { porcentajeCumplimiento, redondear } from '../../utils/numeros';
 
 /**
@@ -164,7 +164,7 @@ proyeccionesRouter.post(
               mes.comentarios ?? null,
               estado,
               estado === 'APROBADA' ? req.usuario!.id_usuario : null,
-              estado === 'APROBADA' ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null,
+              estado === 'APROBADA' ? ahoraGuatemala() : null,
               req.usuario!.id_usuario,
               existente.id_proyeccion,
             ],
@@ -186,7 +186,7 @@ proyeccionesRouter.post(
               mes.comentarios ?? null,
               req.usuario!.id_usuario,
               estado === 'APROBADA' ? req.usuario!.id_usuario : null,
-              estado === 'APROBADA' ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null,
+              estado === 'APROBADA' ? ahoraGuatemala() : null,
             ],
             conn,
           );

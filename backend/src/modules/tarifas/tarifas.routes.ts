@@ -23,6 +23,7 @@ import {
   anioActual,
   etiquetaTrimestre,
   mesesDelTrimestre,
+  ahoraGuatemala,
   nombreMesesTrimestre,
   periodoTarifario,
   sqlAnioTarifario,
@@ -290,7 +291,7 @@ tarifasRouter.post(
         datos.motivo || null,
         req.usuario!.id_usuario,
         apruebaAhora ? req.usuario!.id_usuario : null,
-        apruebaAhora ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null,
+        apruebaAhora ? ahoraGuatemala() : null,
       ],
     );
 

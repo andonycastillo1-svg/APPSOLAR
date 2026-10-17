@@ -92,6 +92,9 @@ export const env = {
     database: isTest
       ? str('DB_NAME_TEST', `${str('DB_NAME', 'appsolar')}_test`)
       : str('DB_NAME', 'appsolar'),
+    // Zona horaria de las sesiones MySQL: NOW() y CURRENT_TIMESTAMP se guardan en hora de Guatemala
+    // sin importar la zona del servidor (en Hostinger suele ser UTC). Guatemala no usa horario de verano.
+    timezone: str('DB_TIMEZONE', '-06:00'),
     connectionLimit: num('DB_CONNECTION_LIMIT', 10),
     // Debe ser MENOR que el wait_timeout del servidor MySQL/MariaDB (en Hostinger son 20 s).
     idleTimeoutMs: num('DB_IDLE_TIMEOUT_MS', 10000),

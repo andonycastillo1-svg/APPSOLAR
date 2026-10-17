@@ -64,7 +64,7 @@ export function getPool(): Pool {
       dateStrings: true,
       decimalNumbers: true,
       multipleStatements: false,
-      timezone: 'Z',
+      timezone: env.db.timezone,
       supportBigNumbers: true,
       namedPlaceholders: false,
       typeCast: convertirTipo as never,
@@ -76,6 +76,11 @@ export function getPool(): Pool {
       keepAliveInitialDelay: 5_000,
       maxIdle: Math.min(3, env.db.connectionLimit),
       idleTimeout: env.db.idleTimeoutMs,
+    });
+    // Toda conexion nueva trabaja en la zona horaria de Guatemala: la auditoria y los demas sellos de
+    // tiempo (NOW()) quedan en la misma hora que ve el usuario, tambien al consultar la base directamente.
+    pool.on('connection', (conexion) => {
+      conexion.query(`SET time_zone = '${env.db.timezone}'`);
     });
   }
   return pool;

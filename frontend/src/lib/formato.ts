@@ -55,19 +55,15 @@ export function fecha(iso: string | null | undefined): string {
   return `${d}/${m}/${a}`;
 }
 
+/**
+ * Fecha y hora de un sello de tiempo de la base de datos. El sistema guarda todas las horas ya en
+ * hora de Guatemala, por lo que se muestran tal cual, sin convertir de zona.
+ */
 export function fechaHora(iso: string | null | undefined): string {
   if (!iso) return '—';
-  const texto = String(iso);
-  const valor = new Date(texto.includes('T') ? texto : texto.replace(' ', 'T') + 'Z');
-  if (Number.isNaN(valor.getTime())) return texto;
-  return new Intl.DateTimeFormat('es-GT', {
-    timeZone: ZONA_HORARIA,
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(valor);
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return String(iso);
+  return `${m[3]}/${m[2]}/${m[1]}, ${m[4]}:${m[5]}`;
 }
 
 export const MESES = [
