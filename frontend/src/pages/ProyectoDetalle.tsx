@@ -1857,7 +1857,7 @@ function PanelTarifas({ idProyecto, pactada }: { idProyecto: number; pactada: bo
             void ejecutar(async () => {
               const mensaje = await mutacion.mutateAsync({
                 ruta: `/projects/${idProyecto}/rates/${cierre.abrir ? 'reopen' : 'close'}`,
-                cuerpo: { anio, mes: cierre.mes, motivo: cierre.motivo || undefined },
+                cuerpo: { anio: cierre.mes >= 11 ? anio : anio + 1, mes: cierre.mes, motivo: cierre.motivo || undefined },
               });
               setCierre(null);
               return mensaje;

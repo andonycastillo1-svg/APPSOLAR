@@ -26,3 +26,7 @@ hosting/hostinger.env
 
 # Archivos temporales de Word
 ~$*
+
+storage/respaldos/
+storage/uploads/*.csv
+storage/uploads/*.json

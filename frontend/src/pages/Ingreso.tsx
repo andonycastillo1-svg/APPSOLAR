@@ -65,7 +65,7 @@ export function PaginaIngreso() {
           {error ? (
             <div className="mensaje mensaje--error" role="alert">
               <div>
-                <strong>No fue posible iniciar sesion</strong>
+                <strong className="mensaje__titulo">No fue posible iniciar sesion</strong>
                 {error}
                 {detalle.length > 0 ? (
                   <ul style={{ margin: '0.4rem 0 0 1rem' }}>
