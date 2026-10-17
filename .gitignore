@@ -30,3 +30,9 @@ hosting/hostinger.env
 storage/respaldos/
 storage/uploads/*.csv
 storage/uploads/*.json
+
+# Plantillas y ejemplos generados (no se versionan)
+database/seeds/ejemplo_con_errores.csv
+LEEME*
+README*
+*.ejemplo
