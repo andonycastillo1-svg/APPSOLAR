@@ -1,0 +1,3291 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Sistema Centralizado de Monitoreo Energetico y Analisis de Produccion Solar",
+    "version": "1.1.0",
+    "description": "API REST interna de Retse, S.A. para centralizar la informacion energetica de los proyectos fotovoltaicos.\n\n**Convenciones generales**\n\n- Toda respuesta correcta usa el sobre `{ \"ok\": true, \"datos\": ..., \"meta\": ... }`.\n- Todo error usa `{ \"ok\": false, \"error\": { \"codigo\", \"mensaje\", \"detalles\", \"correlationId\" } }` con el mensaje en espanol.\n- Fechas en ISO `YYYY-MM-DD`; la interfaz las presenta como `dd/mm/aaaa`.\n- Energia en kWh, potencia instalada en kWp, moneda GTQ (Q), zona horaria `America/Guatemala`.\n- La sesion viaja en cookies `HttpOnly`; las operaciones que modifican estado requieren la cabecera `x-csrf-token` con el valor de la cookie `as_csrf`.",
+    "contact": {
+      "name": "Retse, S.A."
+    }
+  },
+  "servers": [
+    {
+      "url": "/api",
+      "description": "Servidor actual"
+    },
+    {
+      "url": "https://monitoreo.retse.com.gt/api",
+      "description": "Produccion (subdominio institucional)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Autenticacion",
+      "description": "Inicio y cierre de sesion, renovacion y perfil"
+    },
+    {
+      "name": "Usuarios",
+      "description": "Administracion de usuarios y permisos individuales"
+    },
+    {
+      "name": "Clientes",
+      "description": "Empresas propietarias de los proyectos"
+    },
+    {
+      "name": "Proyectos",
+      "description": "Proyectos solares y sus submodulos"
+    },
+    {
+      "name": "Tarifas",
+      "description": "Tarifas mensuales de kWh por proyecto"
+    },
+    {
+      "name": "Proyecciones",
+      "description": "Proyecciones mensuales de generacion"
+    },
+    {
+      "name": "Inversores",
+      "description": "Dispositivos inversores"
+    },
+    {
+      "name": "Produccion",
+      "description": "Registros de produccion, agregaciones y comparaciones"
+    },
+    {
+      "name": "Importaciones",
+      "description": "Carga manual de historicos (ETL)"
+    },
+    {
+      "name": "Integracion",
+      "description": "Huawei SmartPVMS"
+    },
+    {
+      "name": "Dashboard",
+      "description": "Indicadores consolidados"
+    },
+    {
+      "name": "Reportes",
+      "description": "Generacion y exportacion de reportes"
+    },
+    {
+      "name": "Auditoria",
+      "description": "Bitacora de acciones relevantes"
+    },
+    {
+      "name": "Configuracion",
+      "description": "Parametros del sistema"
+    },
+    {
+      "name": "Operacion",
+      "description": "Estado de servicios"
+    },
+    {
+      "name": "Grupos",
+      "description": "Grupos de inversores dentro de un proyecto."
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "cookieSesion": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "as_acceso",
+        "description": "Token de acceso JWT en cookie HttpOnly. Se obtiene con POST /auth/login."
+      },
+      "tokenCsrf": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-csrf-token",
+        "description": "Obligatorio en POST, PUT, PATCH y DELETE cuando la sesion viaja por cookie."
+      }
+    },
+    "parameters": {
+      "pagina": {
+        "name": "pagina",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        }
+      },
+      "porPagina": {
+        "name": "porPagina",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 20
+        }
+      },
+      "buscar": {
+        "name": "buscar",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "orden": {
+        "name": "orden",
+        "in": "query",
+        "schema": {
+          "type": "string"
+        },
+        "description": "Campo de ordenamiento. Los valores no permitidos se ignoran."
+      },
+      "direccion": {
+        "name": "direccion",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "asc",
+            "desc"
+          ],
+          "default": "asc"
+        }
+      },
+      "desde": {
+        "name": "desde",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "hasta": {
+        "name": "hasta",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "idCliente": {
+        "name": "id_cliente",
+        "in": "query",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "idProyecto": {
+        "name": "id_proyecto",
+        "in": "query",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "idInversor": {
+        "name": "id_inversor",
+        "in": "query",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "anio": {
+        "name": "anio",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 2000,
+          "maximum": 2100
+        }
+      },
+      "projectId": {
+        "name": "projectId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer"
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "example": false
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "codigo": {
+                "type": "string",
+                "example": "SIN_PERMISO"
+              },
+              "mensaje": {
+                "type": "string",
+                "example": "No cuenta con el permiso necesario para realizar esta accion (tarifas.gestionar)."
+              },
+              "detalles": {},
+              "correlationId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      },
+      "MetaPaginacion": {
+        "type": "object",
+        "properties": {
+          "pagina": {
+            "type": "integer"
+          },
+          "porPagina": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "totalPaginas": {
+            "type": "integer"
+          }
+        }
+      },
+      "Usuario": {
+        "type": "object",
+        "properties": {
+          "id_usuario": {
+            "type": "integer"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "rol": {
+            "type": "string",
+            "enum": [
+              "ADMINISTRATIVO",
+              "OPERATIVO",
+              "GERENCIAL"
+            ]
+          },
+          "activo": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "ultimo_acceso": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "permisos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Cliente": {
+        "type": "object",
+        "required": [
+          "nombre",
+          "nit"
+        ],
+        "properties": {
+          "id_cliente": {
+            "type": "integer",
+            "readOnly": true
+          },
+          "nombre": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 160
+          },
+          "nit": {
+            "type": "string",
+            "maxLength": 30,
+            "description": "Validado con el patron configurable `nit.patron`."
+          },
+          "ubicacion": {
+            "type": "string",
+            "nullable": true
+          },
+          "contacto": {
+            "type": "string",
+            "nullable": true
+          },
+          "telefono": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "activo": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "Proyecto": {
+        "type": "object",
+        "required": [
+          "id_cliente",
+          "nombre",
+          "proyeccion"
+        ],
+        "properties": {
+          "id_proyecto": {
+            "type": "integer",
+            "readOnly": true
+          },
+          "id_cliente": {
+            "type": "integer"
+          },
+          "nombre": {
+            "type": "string",
+            "description": "Debe coincidir con la columna Planta del formato historico."
+          },
+          "ubicacion": {
+            "type": "string",
+            "nullable": true
+          },
+          "tipo_proyecto": {
+            "type": "string",
+            "enum": [
+              "PPA",
+              "EPC",
+              "EDS"
+            ]
+          },
+          "capacidad_kwp": {
+            "type": "number",
+            "nullable": true,
+            "description": "Potencia instalada en kWp. NUNCA energia generada."
+          },
+          "fecha_inicio": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "activo": {
+            "type": "boolean",
+            "default": true
+          },
+          "proyeccion": {
+            "type": "object",
+            "required": [
+              "anio",
+              "meses"
+            ],
+            "description": "OBLIGATORIA al crear el proyecto. Proyeccion anual repartida en los 12 meses; es la base contra la que se compara despues la generacion real.",
+            "properties": {
+              "anio": {
+                "type": "integer",
+                "minimum": 2000,
+                "maximum": 2100
+              },
+              "aprobarInmediato": {
+                "type": "boolean",
+                "default": false
+              },
+              "meses": {
+                "type": "array",
+                "minItems": 12,
+                "maxItems": 12,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "mes",
+                    "proyeccion_kwh"
+                  ],
+                  "properties": {
+                    "mes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 12
+                    },
+                    "proyeccion_kwh": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "grupos": {
+            "type": "array",
+            "description": "Grupos de inversores a crear junto con el proyecto. Opcional.",
+            "items": {
+              "$ref": "#/components/schemas/Grupo"
+            }
+          }
+        }
+      },
+      "Inversor": {
+        "type": "object",
+        "required": [
+          "id_proyecto",
+          "id_grupo",
+          "marca",
+          "modelo"
+        ],
+        "properties": {
+          "id_inversor": {
+            "type": "integer",
+            "readOnly": true
+          },
+          "id_proyecto": {
+            "type": "integer"
+          },
+          "id_grupo": {
+            "type": "integer",
+            "description": "Grupo al que pertenece el inversor. Debe existir, estar activo y pertenecer al mismo proyecto."
+          },
+          "marca": {
+            "type": "string"
+          },
+          "modelo": {
+            "type": "string"
+          },
+          "tipo_conexion": {
+            "type": "string",
+            "enum": [
+              "MANUAL",
+              "HUAWEI_API"
+            ],
+            "default": "MANUAL"
+          },
+          "serial_externo": {
+            "type": "string",
+            "nullable": true,
+            "description": "Obligatorio cuando tipo_conexion es HUAWEI_API."
+          },
+          "estacion_externa": {
+            "type": "string",
+            "nullable": true
+          },
+          "capacidad_kwp": {
+            "type": "number",
+            "nullable": true
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "ACTIVO",
+              "INACTIVO",
+              "MANTENIMIENTO"
+            ],
+            "default": "ACTIVO"
+          },
+          "id_api": {
+            "type": "integer",
+            "nullable": true
+          },
+          "activo": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "Tarifa": {
+        "type": "object",
+        "required": [
+          "anio",
+          "trimestre",
+          "costo_kwh"
+        ],
+        "description": "El costo del kWh se pacta por trimestre calendario: los tres meses de un trimestre comparten siempre la misma tarifa.",
+        "properties": {
+          "id_tarifa": {
+            "type": "integer",
+            "readOnly": true
+          },
+          "anio": {
+            "type": "integer",
+            "minimum": 2000,
+            "maximum": 2100
+          },
+          "trimestre": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4,
+            "description": "I: enero a marzo. II: abril a junio. III: julio a septiembre. IV: octubre a diciembre."
+          },
+          "costo_kwh": {
+            "type": "number",
+            "minimum": 0,
+            "description": "GTQ por kWh, con 6 decimales."
+          },
+          "moneda": {
+            "type": "string",
+            "enum": [
+              "GTQ"
+            ],
+            "default": "GTQ"
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "BORRADOR",
+              "APROBADA",
+              "ANULADA"
+            ],
+            "readOnly": true
+          },
+          "motivo": {
+            "type": "string",
+            "nullable": true
+          },
+          "aprobarInmediato": {
+            "type": "boolean",
+            "default": false,
+            "description": "Requiere el permiso tarifas.aprobar."
+          }
+        }
+      },
+      "ImpactoTarifa": {
+        "type": "object",
+        "properties": {
+          "id_tarifa": {
+            "type": "integer"
+          },
+          "anio": {
+            "type": "integer"
+          },
+          "trimestre": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "etiqueta": {
+            "type": "string",
+            "example": "II trimestre 2026"
+          },
+          "registrosAfectados": {
+            "type": "integer"
+          },
+          "kwhAfectados": {
+            "type": "number"
+          },
+          "costoActual": {
+            "type": "number"
+          },
+          "costoPropuesto": {
+            "type": "number"
+          },
+          "valorAnterior": {
+            "type": "number"
+          },
+          "valorNuevo": {
+            "type": "number"
+          },
+          "diferencia": {
+            "type": "number"
+          },
+          "mesesCerrados": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Meses del trimestre cerrados contablemente. Deben reabrirse antes de corregir."
+          },
+          "advertencia": {
+            "type": "string"
+          }
+        }
+      },
+      "Produccion": {
+        "type": "object",
+        "properties": {
+          "id_produccion": {
+            "type": "integer"
+          },
+          "id_proyecto": {
+            "type": "integer"
+          },
+          "id_grupo": {
+            "type": "integer",
+            "nullable": true
+          },
+          "id_inversor": {
+            "type": "integer",
+            "nullable": true
+          },
+          "nivel_detalle": {
+            "type": "string",
+            "enum": [
+              "POR_INVERSOR",
+              "GRUPO_CONSOLIDADO",
+              "PROYECTO_CONSOLIDADO"
+            ],
+            "description": "POR_INVERSOR exige id_inversor e id_grupo. GRUPO_CONSOLIDADO exige id_grupo sin inversor. PROYECTO_CONSOLIDADO no lleva ninguno de los dos."
+          },
+          "fecha": {
+            "type": "string",
+            "format": "date"
+          },
+          "granularidad": {
+            "type": "string",
+            "enum": [
+              "DIARIA",
+              "MENSUAL"
+            ]
+          },
+          "kwh": {
+            "type": "number",
+            "minimum": 0
+          },
+          "origen": {
+            "type": "string",
+            "enum": [
+              "MANUAL",
+              "HUAWEI_API",
+              "AJUSTE"
+            ]
+          },
+          "secuencia": {
+            "type": "integer",
+            "description": "Distingue componentes legitimos del mismo periodo."
+          },
+          "costo_kwh_aplicado": {
+            "type": "number",
+            "nullable": true
+          },
+          "valor_q": {
+            "type": "number",
+            "nullable": true
+          },
+          "estado_valorizacion": {
+            "type": "string",
+            "enum": [
+              "VALORIZADA",
+              "PENDIENTE_DE_TARIFA"
+            ]
+          },
+          "comentarios": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ResumenProduccion": {
+        "type": "object",
+        "properties": {
+          "kwh": {
+            "type": "number"
+          },
+          "valor_q": {
+            "type": "number"
+          },
+          "registros": {
+            "type": "integer"
+          },
+          "registrosPendientes": {
+            "type": "integer"
+          },
+          "kwhPendientes": {
+            "type": "number"
+          },
+          "primeraFecha": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "ultimaFecha": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "coberturaTarifaria": {
+            "type": "object",
+            "properties": {
+              "mesesConTarifa": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "mesesPendientes": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "registrosPendientes": {
+                "type": "integer"
+              },
+              "completa": {
+                "type": "boolean"
+              }
+            }
+          },
+          "periodosConMezclaDeNiveles": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "PrevisualizacionImportacion": {
+        "type": "object",
+        "properties": {
+          "id_historico": {
+            "type": "integer"
+          },
+          "formato": {
+            "type": "string",
+            "enum": [
+              "NORMALIZADO",
+              "HISTORICO_EXCEL"
+            ]
+          },
+          "nivelDetalleLote": {
+            "type": "string",
+            "enum": [
+              "POR_INVERSOR",
+              "PROYECTO_CONSOLIDADO"
+            ]
+          },
+          "totales": {
+            "type": "object"
+          },
+          "muestra": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "gruposQueRequierenDecision": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "plantasNoResueltas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "duplicados": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "conflictosNivelDetalle": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "periodosCerrados": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "mesesSinTarifaAprobada": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "problemas": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "puedeConfirmar": {
+            "type": "boolean"
+          },
+          "requiereConfirmarCargaParcial": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ResultadoSincronizacion": {
+        "type": "object",
+        "properties": {
+          "id_sync": {
+            "type": "integer"
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "COMPLETADA",
+              "COMPLETADA_CON_ERRORES",
+              "FALLIDA"
+            ]
+          },
+          "modo": {
+            "type": "string",
+            "enum": [
+              "MOCK",
+              "REAL"
+            ]
+          },
+          "filasRecibidas": {
+            "type": "integer"
+          },
+          "insertadas": {
+            "type": "integer"
+          },
+          "actualizadas": {
+            "type": "integer"
+          },
+          "rechazadas": {
+            "type": "integer"
+          },
+          "pendientesTarifa": {
+            "type": "integer"
+          },
+          "duracionMs": {
+            "type": "integer"
+          },
+          "advertencias": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "esSimulado": {
+            "type": "boolean"
+          },
+          "etiquetaOrigen": {
+            "type": "string"
+          }
+        }
+      },
+      "Grupo": {
+        "type": "object",
+        "required": [
+          "nombre"
+        ],
+        "description": "Nivel intermedio de la jerarquia PROYECTO -> GRUPO -> INVERSOR. Es la unidad sobre la que se carga produccion manualmente cuando el fabricante no entrega datos.",
+        "properties": {
+          "id_grupo": {
+            "type": "integer",
+            "readOnly": true
+          },
+          "nombre": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120,
+            "description": "Unico dentro del proyecto."
+          },
+          "cantidad_inversores_declarada": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2000,
+            "nullable": true,
+            "description": "Cuantos inversores deberia tener el grupo. El API avisa si no coincide con los registrados."
+          },
+          "tiene_banco_baterias": {
+            "type": "boolean",
+            "default": false
+          },
+          "capacidad_baterias_kwh": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true,
+            "description": "Solo valida si tiene_banco_baterias es true."
+          },
+          "capacidad_kwp": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true,
+            "description": "Potencia instalada del grupo en kWp."
+          },
+          "ubicacion": {
+            "type": "string",
+            "nullable": true
+          },
+          "observaciones": {
+            "type": "string",
+            "nullable": true
+          },
+          "activo": {
+            "type": "boolean",
+            "default": true
+          },
+          "inversores_registrados": {
+            "type": "integer",
+            "readOnly": true
+          },
+          "inversoresFaltantes": {
+            "type": "integer",
+            "readOnly": true
+          },
+          "avisoInversores": {
+            "type": "string",
+            "nullable": true,
+            "readOnly": true
+          }
+        }
+      },
+      "AlertaTrimestral": {
+        "type": "object",
+        "description": "Aviso de que toca actualizar la tarifa del kWh. Se dispara cuando el trimestre en curso no tiene tarifa aprobada, o cuando faltan pocos dias para el siguiente y este tampoco la tiene.",
+        "properties": {
+          "trimestreActual": {
+            "type": "object"
+          },
+          "trimestreSiguiente": {
+            "type": "object"
+          },
+          "diasRestantes": {
+            "type": "integer"
+          },
+          "diasDeAviso": {
+            "type": "integer",
+            "description": "Parametro tarifa.dias_aviso_trimestre."
+          },
+          "proyectosSinTarifaActual": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "proyectosSinTarifaSiguiente": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "requiereAtencion": {
+            "type": "boolean"
+          },
+          "mensaje": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "HuecoDeDatos": {
+        "type": "object",
+        "description": "Dias sin lectura diaria de un grupo dentro del periodo consultado.",
+        "properties": {
+          "id_grupo": {
+            "type": "integer"
+          },
+          "grupo": {
+            "type": "string"
+          },
+          "id_proyecto": {
+            "type": "integer"
+          },
+          "proyecto": {
+            "type": "string"
+          },
+          "dias_esperados": {
+            "type": "integer"
+          },
+          "dias_con_datos": {
+            "type": "integer"
+          },
+          "dias_faltantes": {
+            "type": "integer"
+          },
+          "primera_fecha": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "ultima_fecha": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          }
+        }
+      }
+    },
+    "responses": {
+      "NoAutenticado": {
+        "description": "Sesion ausente, invalida o expirada",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "SinPermiso": {
+        "description": "El rol no incluye el permiso requerido",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NoEncontrado": {
+        "description": "El recurso no existe",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Validacion": {
+        "description": "Datos invalidos",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflicto": {
+        "description": "Regla de negocio o conflicto de estado",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "cookieSesion": [],
+      "tokenCsrf": []
+    }
+  ],
+  "paths": {
+    "/audit": {
+      "get": {
+        "tags": [
+          "Auditoria"
+        ],
+        "summary": "Consultar la bitacora",
+        "description": "Requiere `auditoria.ver`. Nunca contiene contrasenas, tokens ni archivos completos.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/pagina"
+          },
+          {
+            "$ref": "#/components/parameters/porPagina"
+          },
+          {
+            "name": "accion",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entidad",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resultado",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "EXITO",
+                "FALLO"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Eventos"
+          }
+        }
+      }
+    },
+    "/audit/acciones": {
+      "get": {
+        "tags": [
+          "Auditoria"
+        ],
+        "summary": "Catalogo de acciones y entidades registradas",
+        "responses": {
+          "200": {
+            "description": "Catalogo"
+          }
+        }
+      }
+    },
+    "/auth/change-password": {
+      "post": {
+        "tags": [
+          "Autenticacion"
+        ],
+        "summary": "Cambiar la contrasena propia",
+        "description": "Politica: minimo 10 caracteres con mayuscula, minuscula, numero y caracter especial. Al cambiarla se revocan las demas sesiones.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "passwordActual",
+                  "passwordNueva"
+                ],
+                "properties": {
+                  "passwordActual": {
+                    "type": "string"
+                  },
+                  "passwordNueva": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contrasena actualizada"
+          },
+          "422": {
+            "$ref": "#/components/responses/Validacion"
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "Autenticacion"
+        ],
+        "summary": "Iniciar sesion",
+        "description": "Establece las cookies de sesion. Limitado a 20 intentos por ventana de 15 minutos. Tras 5 fallos el usuario se bloquea temporalmente.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "email": "demo.gerencia@retse.com.gt",
+                "password": "********"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sesion iniciada",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true,
+                  "datos": {
+                    "usuario": {
+                      "id_usuario": 5,
+                      "nombre": "Demo Gerencia",
+                      "rol": "GERENCIAL",
+                      "permisos": [
+                        "dashboard.ver",
+                        "reportes.ver"
+                      ]
+                    },
+                    "csrfToken": "a1b2c3",
+                    "debeCambiarPassword": false,
+                    "expiraEnMinutos": 15
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/NoAutenticado"
+          },
+          "429": {
+            "description": "Usuario bloqueado o limite de intentos alcanzado"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "Autenticacion"
+        ],
+        "summary": "Cerrar sesion",
+        "responses": {
+          "200": {
+            "description": "Sesion finalizada"
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "Autenticacion"
+        ],
+        "summary": "Perfil autenticado y permisos efectivos",
+        "responses": {
+          "200": {
+            "description": "Perfil"
+          },
+          "401": {
+            "$ref": "#/components/responses/NoAutenticado"
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": [
+          "Autenticacion"
+        ],
+        "summary": "Renovar la sesion",
+        "description": "Rota el refresh token. Reusar un token ya rotado invalida toda la familia de sesiones.",
+        "responses": {
+          "200": {
+            "description": "Sesion renovada"
+          },
+          "401": {
+            "$ref": "#/components/responses/NoAutenticado"
+          }
+        }
+      }
+    },
+    "/auth/sesiones": {
+      "get": {
+        "tags": [
+          "Autenticacion"
+        ],
+        "summary": "Sesiones activas del propio usuario",
+        "responses": {
+          "200": {
+            "description": "Conteo de sesiones activas"
+          }
+        }
+      }
+    },
+    "/clients": {
+      "get": {
+        "tags": [
+          "Clientes"
+        ],
+        "summary": "Listar clientes",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/pagina"
+          },
+          {
+            "$ref": "#/components/parameters/porPagina"
+          },
+          {
+            "$ref": "#/components/parameters/buscar"
+          },
+          {
+            "name": "activo",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado paginado"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Clientes"
+        ],
+        "summary": "Crear cliente",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cliente"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          }
+        }
+      }
+    },
+    "/clients/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/id"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Clientes"
+        ],
+        "summary": "Detalle con sus proyectos",
+        "responses": {
+          "200": {
+            "description": "Detalle"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Clientes"
+        ],
+        "summary": "Actualizar cliente",
+        "responses": {
+          "200": {
+            "description": "Actualizado"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Clientes"
+        ],
+        "summary": "Eliminar o desactivar",
+        "description": "Si el cliente tiene proyectos asociados se desactiva en lugar de eliminarse.",
+        "responses": {
+          "200": {
+            "description": "Resultado con la bandera `eliminado`"
+          }
+        }
+      }
+    },
+    "/config": {
+      "get": {
+        "tags": [
+          "Configuracion"
+        ],
+        "summary": "Parametros del sistema",
+        "description": "Incluye limites de carga, politicas de sesion, horario de sincronizacion y los factores de equivalencia ambiental con su unidad y fuente.",
+        "responses": {
+          "200": {
+            "description": "Parametros"
+          }
+        }
+      }
+    },
+    "/config/{clave}": {
+      "put": {
+        "tags": [
+          "Configuracion"
+        ],
+        "summary": "Actualizar un parametro editable",
+        "parameters": [
+          {
+            "name": "clave",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Actualizado"
+          },
+          "409": {
+            "description": "El parametro es fijo del sistema"
+          }
+        }
+      }
+    },
+    "/dashboard": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Indicadores consolidados del periodo",
+        "description": "Incluye produccion, valor economico, proyeccion y cumplimiento, variacion contra el periodo anterior equivalente, tarifas aplicadas mes a mes, cobertura tarifaria, serie temporal, distribucion por proyecto, comparacion entre inversores, ultimas operaciones de datos y equivalencias ambientales con su unidad y fuente.",
+        "parameters": [
+          {
+            "name": "desde",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "hasta",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/idCliente"
+          },
+          {
+            "$ref": "#/components/parameters/idProyecto"
+          },
+          {
+            "$ref": "#/components/parameters/idInversor"
+          },
+          {
+            "name": "granularidad",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "DIARIA",
+                "MENSUAL",
+                "ANUAL"
+              ],
+              "default": "MENSUAL"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Indicadores"
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Operacion"
+        ],
+        "summary": "Estado publico minimo",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Operativo"
+          },
+          "503": {
+            "description": "Degradado"
+          }
+        }
+      }
+    },
+    "/health/detalle": {
+      "get": {
+        "tags": [
+          "Operacion"
+        ],
+        "summary": "Estado detallado (requiere `salud.ver`)",
+        "description": "API, MySQL, servicio Python, integracion Huawei, tarea programada y ultimas operaciones de datos.",
+        "responses": {
+          "200": {
+            "description": "Estado detallado"
+          },
+          "403": {
+            "$ref": "#/components/responses/SinPermiso"
+          }
+        }
+      }
+    },
+    "/imports": {
+      "get": {
+        "tags": [
+          "Importaciones"
+        ],
+        "summary": "Historial de importaciones",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/pagina"
+          },
+          {
+            "$ref": "#/components/parameters/porPagina"
+          },
+          {
+            "name": "estado",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado"
+          }
+        }
+      }
+    },
+    "/imports/preview": {
+      "post": {
+        "tags": [
+          "Importaciones"
+        ],
+        "summary": "Validar y previsualizar un archivo",
+        "description": "Valida extension, tamano, firma binaria, encabezados y contenido. NO modifica la produccion. Detecta duplicados, grupos que requieren decision, conflictos de nivel de detalle, periodos cerrados y meses sin tarifa.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "archivo": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "id_proyecto": {
+                    "type": "integer"
+                  },
+                  "id_inversor": {
+                    "type": "integer"
+                  },
+                  "anio": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Previsualizacion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrevisualizacionImportacion"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/Validacion"
+          }
+        }
+      }
+    },
+    "/imports/template": {
+      "get": {
+        "tags": [
+          "Importaciones"
+        ],
+        "summary": "Descargar plantilla o archivo de ejemplo con errores",
+        "parameters": [
+          {
+            "name": "formato",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "NORMALIZADO",
+                "HISTORICO_EXCEL"
+              ],
+              "default": "HISTORICO_EXCEL"
+            }
+          },
+          {
+            "name": "tipo",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "csv",
+                "xlsx",
+                "errores"
+              ],
+              "default": "xlsx"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archivo"
+          }
+        }
+      }
+    },
+    "/imports/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/id"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Importaciones"
+        ],
+        "summary": "Detalle de una importacion con sus errores",
+        "responses": {
+          "200": {
+            "description": "Detalle"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Importaciones"
+        ],
+        "summary": "Cancelar una previsualizacion no confirmada",
+        "responses": {
+          "200": {
+            "description": "Cancelada"
+          }
+        }
+      }
+    },
+    "/imports/{id}/confirm": {
+      "post": {
+        "tags": [
+          "Importaciones"
+        ],
+        "summary": "Confirmar la carga previsualizada",
+        "description": "Aplica el lote en una unica transaccion. Exige resolver las decisiones de grupo, aceptar explicitamente la carga parcial cuando hay filas con error y confirmar la mezcla de niveles de detalle si la hubiera.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "politicaDuplicados": "ACTUALIZAR",
+                "decisiones": {
+                  "Planta Norte|2025|3": "SUMAR"
+                },
+                "mapeoPlantas": {},
+                "aceptarCargaParcial": true,
+                "confirmarMezclaNiveles": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultado de la carga"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          }
+        }
+      }
+    },
+    "/imports/{id}/errors": {
+      "get": {
+        "tags": [
+          "Importaciones"
+        ],
+        "summary": "Descargar el detalle de errores en CSV",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archivo CSV"
+          }
+        }
+      }
+    },
+    "/integrations/huawei/config": {
+      "get": {
+        "tags": [
+          "Integracion"
+        ],
+        "summary": "Configuracion de la integracion",
+        "description": "Nunca devuelve credenciales: solo la referencia al almacen de secretos y el usuario enmascarado.",
+        "responses": {
+          "200": {
+            "description": "Configuracion y pasos para activar el modo real"
+          }
+        }
+      }
+    },
+    "/integrations/huawei/config/{id}": {
+      "put": {
+        "tags": [
+          "Integracion"
+        ],
+        "summary": "Actualizar la configuracion",
+        "description": "Activar el modo REAL exige registrar la IP publica autorizada por el fabricante.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Actualizada"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          }
+        }
+      }
+    },
+    "/integrations/huawei/runs": {
+      "get": {
+        "tags": [
+          "Integracion"
+        ],
+        "summary": "Historial de ejecuciones",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/pagina"
+          },
+          {
+            "$ref": "#/components/parameters/porPagina"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado"
+          }
+        }
+      }
+    },
+    "/integrations/huawei/runs/{id}": {
+      "get": {
+        "tags": [
+          "Integracion"
+        ],
+        "summary": "Detalle de una ejecucion",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle"
+          }
+        }
+      }
+    },
+    "/integrations/huawei/suggested-range": {
+      "get": {
+        "tags": [
+          "Integracion"
+        ],
+        "summary": "Rango sugerido para sincronizar",
+        "responses": {
+          "200": {
+            "description": "Rango"
+          }
+        }
+      }
+    },
+    "/integrations/huawei/sync": {
+      "post": {
+        "tags": [
+          "Integracion"
+        ],
+        "summary": "Ejecutar una sincronizacion",
+        "description": "Idempotente y protegida por bloqueo de concurrencia. En modo MOCK los datos son simulados y se etiquetan como tales.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "example": {
+                "id_api": 1,
+                "id_proyecto": null,
+                "id_inversor": null,
+                "desde": "2026-08-14",
+                "hasta": "2026-08-21",
+                "granularidad": "DIARIA"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultadoSincronizacion"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "CREDENCIALES_INVALIDAS"
+          },
+          "403": {
+            "description": "IP_NO_AUTORIZADA"
+          },
+          "429": {
+            "description": "LIMITE_API"
+          },
+          "502": {
+            "description": "FORMATO_INESPERADO"
+          },
+          "503": {
+            "description": "SERVICIO_NO_DISPONIBLE"
+          },
+          "504": {
+            "description": "TIEMPO_AGOTADO"
+          }
+        }
+      }
+    },
+    "/integrations/huawei/test": {
+      "post": {
+        "tags": [
+          "Integracion"
+        ],
+        "summary": "Probar la conexion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "id_api": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Prueba exitosa"
+          },
+          "401": {
+            "description": "Credenciales invalidas"
+          },
+          "403": {
+            "description": "IP no autorizada"
+          },
+          "504": {
+            "description": "Tiempo de espera agotado"
+          }
+        }
+      }
+    },
+    "/inverters": {
+      "get": {
+        "tags": [
+          "Inversores"
+        ],
+        "summary": "Listar inversores",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/pagina"
+          },
+          {
+            "$ref": "#/components/parameters/porPagina"
+          },
+          {
+            "$ref": "#/components/parameters/buscar"
+          },
+          {
+            "$ref": "#/components/parameters/idProyecto"
+          },
+          {
+            "$ref": "#/components/parameters/idCliente"
+          },
+          {
+            "name": "tipo_conexion",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "MANUAL",
+                "HUAWEI_API"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado paginado"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Inversores"
+        ],
+        "summary": "Crear inversor",
+        "description": "No se puede crear un inversor sin proyecto. Los de tipo HUAWEI_API exigen identificador externo.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Inversor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado"
+          }
+        }
+      }
+    },
+    "/inverters/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/id"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Inversores"
+        ],
+        "summary": "Detalle con produccion, importaciones y sincronizaciones",
+        "responses": {
+          "200": {
+            "description": "Detalle"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Inversores"
+        ],
+        "summary": "Actualizar inversor",
+        "responses": {
+          "200": {
+            "description": "Actualizado"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Inversores"
+        ],
+        "summary": "Eliminar o desactivar",
+        "responses": {
+          "200": {
+            "description": "Resultado"
+          }
+        }
+      }
+    },
+    "/production": {
+      "get": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Detalle paginado de produccion",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/desde"
+          },
+          {
+            "$ref": "#/components/parameters/hasta"
+          },
+          {
+            "$ref": "#/components/parameters/idCliente"
+          },
+          {
+            "$ref": "#/components/parameters/idProyecto"
+          },
+          {
+            "$ref": "#/components/parameters/idInversor"
+          },
+          {
+            "$ref": "#/components/parameters/pagina"
+          },
+          {
+            "$ref": "#/components/parameters/porPagina"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Produccion"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Registrar produccion manual",
+        "description": "Sin `id_inversor` el registro se guarda como consolidado del proyecto. No se aceptan kWh negativos ni fechas futuras.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "example": {
+                "id_proyecto": 1,
+                "id_inversor": 3,
+                "fecha": "2026-08-15",
+                "kwh": 1250.5,
+                "granularidad": "DIARIA"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registrada"
+          },
+          "409": {
+            "description": "Duplicado o periodo cerrado"
+          }
+        }
+      }
+    },
+    "/production/annual-summary": {
+      "get": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Resumen anual estilo Excel de referencia",
+        "description": "Doce filas con proyeccion, generacion del anio anterior y del seleccionado, cumplimientos, tarifa aplicada y valor producido.",
+        "parameters": [
+          {
+            "name": "anio",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/idProyecto"
+          },
+          {
+            "$ref": "#/components/parameters/idCliente"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resumen anual"
+          }
+        }
+      }
+    },
+    "/production/by-group": {
+      "get": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Generacion agregada por grupo de inversores",
+        "description": "Requiere `produccion.ver`. Aplica la prevencion de doble conteo.",
+        "responses": {
+          "200": {
+            "description": "Desglose por grupo"
+          }
+        }
+      }
+    },
+    "/production/compare": {
+      "get": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Comparacion con el periodo anterior, por proyecto e inversor",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/desde"
+          },
+          {
+            "$ref": "#/components/parameters/hasta"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comparacion con la base declarada"
+          }
+        }
+      }
+    },
+    "/production/gaps": {
+      "get": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Dias sin datos de cada grupo en el periodo",
+        "description": "Requiere `produccion.ver`. Compara los dias del periodo contra las lecturas DIARIAS registradas de cada grupo. Es el punto de partida de la carga manual cuando falla la conexion con el fabricante.",
+        "responses": {
+          "200": {
+            "description": "Grupos con dias faltantes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HuecoDeDatos"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/production/group-range": {
+      "post": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Cargar manualmente un rango completo para un grupo",
+        "description": "Requiere `produccion.registrar`. Cubre el caso en que un grupo de inversores no tiene datos del fabricante por fallas de conexion: el operador captura la energia y el sistema la distribuye por dia, registrandola como GRUPO_CONSOLIDADO con su motivo y su auditoria.\\n\\nEs idempotente: los dias que ya tienen carga manual se omiten salvo que se pida `sobrescribir`. Si el grupo ya tiene un cierre MENSUAL de alguno de esos meses la operacion se rechaza con 409, porque esa cifra ya cubre el mes completo; para continuar hay que enviar `confirmarMezclaGranularidad`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "id_grupo",
+                  "desde",
+                  "hasta",
+                  "kwh",
+                  "motivo"
+                ],
+                "properties": {
+                  "id_grupo": {
+                    "type": "integer"
+                  },
+                  "desde": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "hasta": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "No puede ser futura. El rango no puede superar 400 dias."
+                  },
+                  "modo": {
+                    "type": "string",
+                    "enum": [
+                      "TOTAL_DISTRIBUIDO",
+                      "DIARIO_UNIFORME"
+                    ],
+                    "default": "TOTAL_DISTRIBUIDO",
+                    "description": "TOTAL_DISTRIBUIDO reparte kwh entre los dias; DIARIO_UNIFORME lo repite en cada dia."
+                  },
+                  "kwh": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "motivo": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 500
+                  },
+                  "sobrescribir": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "confirmarMezclaGranularidad": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              },
+              "example": {
+                "id_grupo": 2,
+                "desde": "2026-03-01",
+                "hasta": "2026-03-07",
+                "modo": "TOTAL_DISTRIBUIDO",
+                "kwh": 4200,
+                "motivo": "El enlace del grupo estuvo caido toda la semana."
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Rango cargado"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          },
+          "422": {
+            "$ref": "#/components/responses/Validacion"
+          }
+        }
+      }
+    },
+    "/production/summary": {
+      "get": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Resumen del periodo con cobertura tarifaria",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/desde"
+          },
+          {
+            "$ref": "#/components/parameters/hasta"
+          },
+          {
+            "$ref": "#/components/parameters/idCliente"
+          },
+          {
+            "$ref": "#/components/parameters/idProyecto"
+          },
+          {
+            "$ref": "#/components/parameters/idInversor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resumen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumenProduccion"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/production/timeseries": {
+      "get": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Serie temporal agregada",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/desde"
+          },
+          {
+            "$ref": "#/components/parameters/hasta"
+          },
+          {
+            "name": "granularidad",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "DIARIA",
+                "MENSUAL",
+                "ANUAL"
+              ],
+              "default": "MENSUAL"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Serie"
+          }
+        }
+      }
+    },
+    "/production/{id}": {
+      "put": {
+        "tags": [
+          "Produccion"
+        ],
+        "summary": "Corregir un registro",
+        "description": "Requiere `produccion.corregir` y un motivo. `valor_q` se recalcula con la tarifa del mes: nunca se edita a mano.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Corregido"
+          }
+        }
+      }
+    },
+    "/projects": {
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Listar proyectos",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/pagina"
+          },
+          {
+            "$ref": "#/components/parameters/porPagina"
+          },
+          {
+            "$ref": "#/components/parameters/buscar"
+          },
+          {
+            "$ref": "#/components/parameters/idCliente"
+          },
+          {
+            "name": "tipo_proyecto",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PPA",
+                "EPC",
+                "EDS"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado con produccion acumulada separada por nivel de detalle"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Crear proyecto",
+        "description": "No se puede crear un proyecto sin cliente activo. La proyeccion anual repartida en los 12 meses es OBLIGATORIA: es la base contra la que se compara despues la generacion real. Opcionalmente se declaran los grupos de inversores en el mismo acto; proyecto, proyeccion y grupos se crean en una sola transaccion.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Proyecto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado"
+          },
+          "422": {
+            "$ref": "#/components/responses/Validacion"
+          }
+        }
+      }
+    },
+    "/projects/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/id"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Detalle con inversores, resumen y tarifas recientes",
+        "responses": {
+          "200": {
+            "description": "Detalle"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Actualizar proyecto",
+        "responses": {
+          "200": {
+            "description": "Actualizado"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Eliminar o desactivar",
+        "responses": {
+          "200": {
+            "description": "Resultado"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/groups": {
+      "parameters": [
+        {
+          "name": "projectId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Grupos"
+        ],
+        "summary": "Listar los grupos de inversores del proyecto",
+        "description": "Requiere `proyectos.ver`. Devuelve, ademas de cada grupo, cuantos inversores tiene registrados frente a los declarados y el aviso correspondiente.",
+        "responses": {
+          "200": {
+            "description": "Listado de grupos con sus totales"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Grupos"
+        ],
+        "summary": "Crear un grupo de inversores",
+        "description": "Requiere `inversores.gestionar`. El nombre es unico dentro del proyecto. Un grupo sin banco de baterias no puede declarar capacidad de baterias.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Grupo"
+              },
+              "example": {
+                "nombre": "Bloque A - Campo norte",
+                "cantidad_inversores_declarada": 3,
+                "tiene_banco_baterias": true,
+                "capacidad_baterias_kwh": 500,
+                "capacidad_kwp": 700
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Grupo creado"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          },
+          "422": {
+            "$ref": "#/components/responses/Validacion"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/groups/{groupId}": {
+      "parameters": [
+        {
+          "name": "projectId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "groupId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Grupos"
+        ],
+        "summary": "Detalle del grupo con sus inversores y su produccion mensual",
+        "responses": {
+          "200": {
+            "description": "Detalle del grupo"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Grupos"
+        ],
+        "summary": "Actualizar un grupo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Grupo"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Grupo actualizado"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Grupos"
+        ],
+        "summary": "Dar de baja un grupo",
+        "description": "Si el grupo tiene inversores o produccion asociada se DESACTIVA en lugar de eliminarse, para conservar el historico. La respuesta lo indica en `eliminado`.",
+        "responses": {
+          "200": {
+            "description": "Grupo eliminado o desactivado"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/projections": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/projectId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Proyecciones"
+        ],
+        "summary": "Calendario anual de proyecciones y cumplimiento",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/anio"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Calendario con generacion real y cumplimiento"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Proyecciones"
+        ],
+        "summary": "Capturar o actualizar proyecciones",
+        "description": "El anio SIEMPRE es explicito: el sistema nunca lo deduce.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "example": {
+                "anio": 2026,
+                "aprobarInmediato": false,
+                "meses": [
+                  {
+                    "mes": 1,
+                    "proyeccion_kwh": 12000
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Guardadas"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/projections/approve-year": {
+      "post": {
+        "tags": [
+          "Proyecciones"
+        ],
+        "summary": "Aprobar todos los borradores de un anio",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aprobadas"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/projections/copy-year": {
+      "post": {
+        "tags": [
+          "Proyecciones"
+        ],
+        "summary": "Copiar las proyecciones de otro anio",
+        "description": "Exige `confirmado: true`. Crea borradores; no sobrescribe meses existentes.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Copiadas"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/projections/{projectionId}/approve": {
+      "post": {
+        "tags": [
+          "Proyecciones"
+        ],
+        "summary": "Aprobar una proyeccion",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          },
+          {
+            "name": "projectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aprobada"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/projectId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Calendario trimestral de tarifas del anio",
+        "description": "Requiere `tarifas.ver`. Devuelve los 4 trimestres del anio con su tarifa, los meses que cubre, cuales estan cerrados, la produccion asociada y el aviso de actualizacion.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/anio"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Calendario anual"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Registrar la tarifa de un trimestre",
+        "description": "Requiere `tarifas.gestionar`. `aprobarInmediato` exige ademas `tarifas.aprobar`. Solo puede existir una tarifa vigente por proyecto, anio y trimestre; la tarifa se aplica a los tres meses del trimestre.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Tarifa"
+              },
+              "example": {
+                "anio": 2026,
+                "trimestre": 2,
+                "costo_kwh": 1.234567,
+                "aprobarInmediato": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tarifa registrada"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates/alert": {
+      "parameters": [
+        {
+          "name": "projectId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Aviso de actualizacion trimestral de la tarifa",
+        "description": "Requiere `tarifas.ver`.",
+        "responses": {
+          "200": {
+            "description": "Estado del aviso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertaTrimestral"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates/close": {
+      "post": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Cerrar un periodo mensual",
+        "description": "Requiere `tarifas.cerrar_mes`. Solo se permite si no quedan registros sin tarifa aprobada.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Periodo cerrado"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates/copy-previous": {
+      "post": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Copiar la tarifa del trimestre anterior",
+        "description": "Requiere `tarifas.gestionar` y `confirmado: true`. Crea un BORRADOR con la tarifa aprobada del trimestre inmediato anterior; nunca se aplica de forma silenciosa.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "anio": 2026,
+                "mes": 4,
+                "confirmado": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Borrador creado"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates/reopen": {
+      "post": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Reabrir un periodo cerrado",
+        "description": "Requiere `tarifas.reabrir_mes` y un motivo de al menos 10 caracteres.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Periodo reabierto"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates/{rateId}": {
+      "put": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Editar una tarifa en BORRADOR",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          },
+          {
+            "name": "rateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Actualizada"
+          },
+          "409": {
+            "description": "La tarifa ya fue aprobada: use el flujo de correccion"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates/{rateId}/annul": {
+      "post": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Anular una tarifa",
+        "description": "Los kWh se conservan; los registros vuelven a PENDIENTE_DE_TARIFA.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          },
+          {
+            "name": "rateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Anulada"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates/{rateId}/approve": {
+      "post": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Aprobar una tarifa",
+        "description": "Requiere `tarifas.aprobar`. Valoriza automaticamente los registros PENDIENTES de ese proyecto y mes.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          },
+          {
+            "name": "rateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aprobada con el detalle de la valorizacion"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates/{rateId}/impact": {
+      "post": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Analizar el impacto de una correccion",
+        "description": "Requiere `tarifas.recalcular`. Obligatorio antes de recalcular.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          },
+          {
+            "name": "rateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "costo_kwh": 1.35
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Impacto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImpactoTarifa"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/rates/{rateId}/recalculate": {
+      "post": {
+        "tags": [
+          "Tarifas"
+        ],
+        "summary": "Corregir una tarifa aprobada y recalcular",
+        "description": "Requiere `tarifas.recalcular`, motivo de al menos 10 caracteres y `confirmado: true`. Queda auditado el antes y el despues.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/projectId"
+          },
+          {
+            "name": "rateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recalculada"
+          },
+          "409": {
+            "description": "El periodo esta cerrado"
+          }
+        }
+      }
+    },
+    "/reports": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Historial de reportes guardados",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/pagina"
+          },
+          {
+            "$ref": "#/components/parameters/porPagina"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado"
+          }
+        }
+      }
+    },
+    "/reports/generate": {
+      "post": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Generar un reporte",
+        "description": "Un reporte con meses sin tarifa aprobada devuelve `advertenciaOficial` y se guarda con cobertura PARCIAL: no puede presentarse como documento oficial completo.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "example": {
+                "tipo": "VALORIZACION",
+                "desde": "2026-01-01",
+                "hasta": "2026-08-21",
+                "id_proyecto": 1,
+                "granularidad": "MENSUAL",
+                "anio": 2026,
+                "guardar": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reporte generado"
+          }
+        }
+      }
+    },
+    "/reports/{id}": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Detalle de un reporte guardado",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle"
+          }
+        }
+      }
+    },
+    "/reports/{id}/export": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Exportar a PDF, CSV o XLSX",
+        "description": "El documento incluye titulo, filtros, fecha de generacion, usuario generador, indicadores, tablas y notas sobre el origen y la actualizacion de los datos.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "formato",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pdf",
+                "csv",
+                "xlsx"
+              ],
+              "default": "pdf"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Documento"
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": [
+          "Usuarios"
+        ],
+        "summary": "Listar usuarios",
+        "description": "Requiere `usuarios.ver`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/pagina"
+          },
+          {
+            "$ref": "#/components/parameters/porPagina"
+          },
+          {
+            "$ref": "#/components/parameters/buscar"
+          },
+          {
+            "name": "rol",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ADMINISTRATIVO",
+                "OPERATIVO",
+                "GERENCIAL"
+              ]
+            }
+          },
+          {
+            "name": "activo",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listado paginado"
+          },
+          "403": {
+            "$ref": "#/components/responses/SinPermiso"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Usuarios"
+        ],
+        "summary": "Crear usuario",
+        "description": "Requiere `usuarios.gestionar`. Devuelve una contrasena temporal que se muestra una sola vez.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Usuario"
+              },
+              "example": {
+                "nombre": "Ana Morales",
+                "email": "ana.morales@retse.com.gt",
+                "rol": "OPERATIVO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Usuario creado"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          }
+        }
+      }
+    },
+    "/users/roles": {
+      "get": {
+        "tags": [
+          "Usuarios"
+        ],
+        "summary": "Catalogo de roles y permisos",
+        "responses": {
+          "200": {
+            "description": "Roles y permisos disponibles"
+          }
+        }
+      }
+    },
+    "/users/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/id"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Usuarios"
+        ],
+        "summary": "Detalle de usuario con permisos efectivos",
+        "responses": {
+          "200": {
+            "description": "Detalle"
+          },
+          "404": {
+            "$ref": "#/components/responses/NoEncontrado"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Usuarios"
+        ],
+        "summary": "Actualizar usuario, rol o estado",
+        "description": "Impide dejar el sistema sin administradores activos y que un usuario se desactive a si mismo. Al desactivar o cambiar de rol se revocan sus sesiones.",
+        "responses": {
+          "200": {
+            "description": "Actualizado"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          }
+        }
+      }
+    },
+    "/users/{id}/permissions": {
+      "put": {
+        "tags": [
+          "Usuarios"
+        ],
+        "summary": "Otorgar o revocar permisos individuales",
+        "description": "Permite convertir a un usuario operativo en coordinador otorgandole `tarifas.gestionar`. Un usuario gerencial nunca puede recibir permisos de escritura.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "otorgados": [
+                  "tarifas.gestionar"
+                ],
+                "revocados": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Permisos actualizados"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflicto"
+          }
+        }
+      }
+    },
+    "/users/{id}/reset-password": {
+      "post": {
+        "tags": [
+          "Usuarios"
+        ],
+        "summary": "Restablecer contrasena",
+        "description": "Genera una contrasena temporal segura, revoca las sesiones y obliga al cambio en el siguiente ingreso. Nunca revela la contrasena anterior.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contrasena temporal generada"
+          }
+        }
+      }
+    }
+  }
+}
